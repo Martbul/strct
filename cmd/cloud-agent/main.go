@@ -11,11 +11,12 @@ import (
 	"time"
 )
 
+//! Put this in env
 const (
 	VPS_IP     = "157.90.167.157"
 	VPS_PORT   = 7000
 	AUTH_TOKEN = "Struct33_Secret_Key_99"
-	DEVICE_ID  = "device_001"             // In production, this would be read from a file/UUID
+	DEVICE_ID  = "device-001"             // In prod use a file/UUID
 	DOMAIN     = "strct.org"
 )
 
@@ -23,16 +24,15 @@ func main() {
 	devMode := flag.Bool("dev", false, "Run in development mode (Mock hardware)")
 	flag.Parse()
 
-	log.Println("--- StructIO Agent Starting ---")
+	log.Println("--- Strct Agent Starting ---")
 
 	var wifiManager wifi.Provider
 
-	// ARM64 Linux and NOT in dev mode -> Real Hardware
 	if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" && !*devMode {
-		log.Println("[INIT] Detected Orange Pi (ARM64). Using REAL Wi-Fi.")
+		log.Println("[INIT] Detected Orange Pi. Using REAL Wi-Fi.")
 		wifiManager = &wifi.RealWiFi{Interface: "wlan0"}
 	} else {
-		log.Println("[INIT] Detected VM/PC. Using MOCK Wi-Fi.")
+		log.Println("[INIT] Detected VM. Using MOCK Wi-Fi.")
 		wifiManager = &wifi.MockWiFi{}
 	}
 
@@ -68,8 +68,8 @@ func main() {
 		ServerPort: VPS_PORT,
 		Token:      AUTH_TOKEN,
 		DeviceID:   DEVICE_ID,
-		LocalPort:  80,     // FileBrowser is running on Port 80
-		BaseDomain: DOMAIN, // e.g., device_001.struct33.com
+		LocalPort:  80,     
+		BaseDomain: DOMAIN, 
 	}
 
 	go func() {

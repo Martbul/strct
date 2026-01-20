@@ -25,7 +25,7 @@ auth.token = "{{.Token}}"
 name = "web_{{.DeviceID}}"
 type = "http"
 localPort = {{.LocalPort}}
-customDomains = ["{{.DeviceID}}.cloud-box.com"]
+customDomains = ["{{.DeviceID}}.{{.BaseDomain}}"]
 `
 
 func StartTunnel(cfg TunnelConfig) error {
