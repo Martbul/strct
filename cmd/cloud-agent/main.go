@@ -3,28 +3,41 @@ package main
 import (
 	"flag"
 	"log"
+	"os"
 	"runtime"
+	"strconv"
+	"strings"
 	"struct33_cloud/internal/disk"
 	"struct33_cloud/internal/docker"
 	"struct33_cloud/internal/tunnel"
 	"struct33_cloud/internal/wifi"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/joho/godotenv"
 )
 
-//! Put this in env
-const (
-	VPS_IP     = "157.90.167.157"
-	VPS_PORT   = 7000
-	AUTH_TOKEN = "Struct33_Secret_Key_99"
-	DEVICE_ID  = "device-001"             // In prod use a file/UUID
-	DOMAIN     = "strct.org"
-)
+type Config struct {
+	VPSIP     string
+	VPSPort   int
+	AuthToken string
+	DeviceID  string
+	Domain    string
+}
 
 func main() {
 	devMode := flag.Bool("dev", false, "Run in development mode (Mock hardware)")
 	flag.Parse()
 
 	log.Println("--- Strct Agent Starting ---")
+
+	if err := godotenv.Load(); err != nil {
+		log.Println("[CONFIG] No .env file found, relying on system env vars")
+	}
+
+cfg := loadConfig()
+	log.Printf("[INIT] Device ID: %s", cfg.DeviceID)
+	log.Printf("[INIT] Target VPS: %s:%d", cfg.VPSIP, cfg.VPSPort)
 
 	var wifiManager wifi.Provider
 
@@ -64,12 +77,12 @@ func main() {
 	}
 
 	tunnelConfig := tunnel.TunnelConfig{
-		ServerIP:   VPS_IP,
-		ServerPort: VPS_PORT,
-		Token:      AUTH_TOKEN,
-		DeviceID:   DEVICE_ID,
-		LocalPort:  80,     
-		BaseDomain: DOMAIN, 
+		ServerIP:   cfg.VPSIP,
+		ServerPort: cfg.VPSPort,
+		Token:      cfg.AuthToken,
+		DeviceID:   cfg.DeviceID,
+		LocalPort:  80,
+		BaseDomain: cfg.Domain,
 	}
 
 	go func() {
@@ -88,4 +101,46 @@ func main() {
 
 	// Blocks forever, preventing the program from exiting
 	select {}
+}
+
+func loadConfig() Config {
+	port, _ := strconv.Atoi(getEnv("VPS_PORT", "7000"))
+
+	return Config{
+		VPSIP:     getEnv("VPS_IP", "127.0.0.1"),
+		VPSPort:   port,
+		AuthToken: getEnv("AUTH_TOKEN", "default-secret"),
+		Domain:    getEnv("DOMAIN", "localhost"),
+		DeviceID:  getOrGenerateDeviceID(), 
+	}
+}
+
+func getEnv(key, fallback string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	return fallback
+}
+
+func getOrGenerateDeviceID() string {
+	// On Linux Arm64 (Production), maybe store in /etc/strct/device-id
+	// For now, we store it in the local running folder.
+	fileName := "device-id.lock"
+	
+	// 3. Try to read existing file
+	content, err := os.ReadFile(fileName)
+	if err == nil {
+		return strings.TrimSpace(string(content))
+	}
+
+	// 4. Generate NEW ID if file doesn't exist
+	newID := "device-" + uuid.New().String()
+	
+	// 5. Save to disk so it persists after reboot
+	err = os.WriteFile(fileName, []byte(newID), 0644)
+	if err != nil {
+		log.Printf("[WARN] Could not save device ID to disk: %v", err)
+	}
+
+	return newID
 }

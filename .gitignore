@@ -13,3 +13,5 @@ filebrowser.db-shm
 
 # IDE settings
 .vscode/
+
+.env
