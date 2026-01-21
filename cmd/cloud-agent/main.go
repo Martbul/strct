@@ -38,6 +38,7 @@ func main() {
 cfg := loadConfig()
 	log.Printf("[INIT] Device ID: %s", cfg.DeviceID)
 	log.Printf("[INIT] Target VPS: %s:%d", cfg.VPSIP, cfg.VPSPort)
+	log.Printf("[INIT] Domain: %s", cfg.Domain)
 
 	var wifiManager wifi.Provider
 

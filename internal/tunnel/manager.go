@@ -12,7 +12,7 @@ type TunnelConfig struct {
 	Token      string
 	DeviceID   string
 	ServerPort int
-	LocalPort  int // running the user's file browser
+	LocalPort  int
 	BaseDomain string
 }
 
@@ -25,7 +25,11 @@ auth.token = "{{.Token}}"
 name = "web_{{.DeviceID}}"
 type = "http"
 localPort = {{.LocalPort}}
-customDomains = ["{{.DeviceID}}.{{.BaseDomain}}"]
+
+# --- CHANGE IS HERE ---
+# Do NOT use customDomains. Use subdomain.
+subdomain = "{{.DeviceID}}"
+# ----------------------
 `
 
 func StartTunnel(cfg TunnelConfig) error {
