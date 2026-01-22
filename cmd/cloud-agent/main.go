@@ -7,14 +7,14 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"struct33_cloud/internal/disk"
-	"struct33_cloud/internal/docker"
-	"struct33_cloud/internal/tunnel"
-	"struct33_cloud/internal/wifi"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
+	"github.com/strct-org/strct-agent/internal/disk"
+	"github.com/strct-org/strct-agent/internal/docker"
+	"github.com/strct-org/strct-agent/internal/tunnel"
+	"github.com/strct-org/strct-agent/internal/wifi"
 )
 
 type Config struct {
