@@ -8,6 +8,7 @@ import (
 type Manager interface {
 	GetStatus() (string, error)
 	Format() error
+	EnsureMounted(mountPoint string) error
 }
 
 // New Factory.

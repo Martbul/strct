@@ -1,6 +1,5 @@
 package wifi
 
-// Network represents a visible WiFi Access Point
 type Network struct {
 	SSID     string
 	Signal   int
@@ -10,4 +9,6 @@ type Network struct {
 type Provider interface {
 	Scan() ([]Network, error)
 	Connect(ssid, password string) error
+	StartHotspot(ssid, password string) error
+	StopHotspot() error
 }

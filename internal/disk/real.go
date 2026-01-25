@@ -37,9 +37,8 @@ func (d *RealDisk) GetStatus() (string, error) {
 		return "Not Found", nil
 	}
 
-	// Logic: If the device has "Children" (partitions), it is formatted.
 	dev := data.Blockdevices[0]
-	status := fmt.Sprintf("Raw/Unformatted (&s)", dev.Size)
+	status := fmt.Sprintf("Raw/Unformatted (%s)", dev.Size)
 
 	if len(dev.Children) > 0 {
 		status = fmt.Sprintf("Formatted (%s)", dev.Size)
@@ -57,7 +56,7 @@ func (d *RealDisk) Format() error {
 	}
 
 	partPath := d.DevicePath + "1"
-	if d.DevicePath ==  "/dev/nvme0n1" {
+	if d.DevicePath == "/dev/nvme0n1" {
 		partPath = d.DevicePath + "p1"
 	}
 
@@ -69,4 +68,27 @@ func (d *RealDisk) Format() error {
 	}
 
 	return nil
+}
+
+func (d *RealDisk) EnsureMounted(mountPoint string) error {
+	//check if mounted
+	cmd := exec.Command("grep", mountPoint, "/proc/mounts")
+	if err := cmd.Run(); err == nil {
+		return nil
+	}
+
+	//create dir
+	exec.Command("mkdir", "-p", mountPoint).Run()
+
+	partPath := d.DevicePath + "1"
+	if d.DevicePath == "/dev/nvme0n1" {
+		partPath = d.DevicePath + "p1"
+	}
+
+	fmt.Printf("[DISK] Mounting %s to %s\n", partPath, mountPoint)
+	if err := exec.Command("mount", partPath, mountPoint).Run(); err != nil {
+		return fmt.Errorf("failed to mount: %v", err)
+	}
+	return nil
+
 }

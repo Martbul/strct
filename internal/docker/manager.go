@@ -1,18 +1,23 @@
 package docker
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
 
 // runing container check
 func EnsureFileBrowser(dataDir string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	containerName := "filebrowser_app"
 
 	//check if running
-	checkCmd := exec.Command("docker", "ps", "-q", "-f", fmt.Sprintf("name=%s", containerName))
+	checkCmd := exec.CommandContext(ctx, "docker", "ps", "-q", "-f", fmt.Sprintf("name=%s", containerName))
 	output, _ := checkCmd.Output()
 
 	if len(output) > 0 {

@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"log"
+	"net/http"
 	"os"
 	"runtime"
 	"strconv"
@@ -13,6 +14,8 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/strct-org/strct-agent/internal/disk"
 	"github.com/strct-org/strct-agent/internal/docker"
+	"github.com/strct-org/strct-agent/internal/ota"
+	"github.com/strct-org/strct-agent/internal/setup"
 	"github.com/strct-org/strct-agent/internal/tunnel"
 	"github.com/strct-org/strct-agent/internal/wifi"
 )
@@ -35,7 +38,7 @@ func main() {
 		log.Println("[CONFIG] No .env file found, relying on system env vars")
 	}
 
-cfg := loadConfig()
+	cfg := loadConfig()
 	log.Printf("[INIT] Device ID: %s", cfg.DeviceID)
 	log.Printf("[INIT] Target VPS: %s:%d", cfg.VPSIP, cfg.VPSPort)
 	log.Printf("[INIT] Domain: %s", cfg.Domain)
@@ -50,12 +53,34 @@ cfg := loadConfig()
 		wifiManager = &wifi.MockWiFi{}
 	}
 
-	nets, err := wifiManager.Scan()
-	if err != nil {
-		log.Printf("[WIFI] Scan error: %v", err)
+	if !hasInternet() {
+		log.Println("[INIT] No Internet detected. Entering SETUP MODE.")
+
+		err := wifiManager.StartHotspot("StructIO-Setup", "12345678")
+		if err != nil {
+			log.Printf("[SETUP] Failed to create hotspot: %v", err)
+		}
+
+		done := make(chan bool)
+		go setup.StartCaptivePortal(wifiManager, done)
+
+		log.Println("[SETUP] Web Server running. Waiting for user credentials...")
+		<-done // BLOCK HERE until user connects
+
+		log.Println("[SETUP] Credentials received. Stopping Hotspot and connecting...")
+		wifiManager.StopHotspot()
+		
+		// Give the wifi chip a moment to switch modes
+		time.Sleep(5 * time.Second)
 	} else {
-		log.Printf("[WIFI] Scan found %d networks", len(nets))
+		log.Println("[INIT] Internet detected. Skipping setup.")
 	}
+
+	otaConfig := ota.Config{
+		CurrentVersion: "1.0.0",
+		StorageURL:     "https://portal.strct.org/updates",
+	}
+	ota.StartUpdater(otaConfig)
 
 	diskMgr := disk.New(*devMode)
 
@@ -69,6 +94,10 @@ cfg := loadConfig()
 	dataDir := "./data"
 	if runtime.GOARCH == "arm64" {
 		dataDir = "/mnt/data"
+	}
+
+	if err := diskMgr.EnsureMounted(dataDir); err != nil {
+		log.Printf("[DISK] CRITICAL: Failed to mount disk: %v", err)
 	}
 
 	log.Printf("[DOCKER] Ensuring FileBrowser is running (Data: %s)...", dataDir)
@@ -104,6 +133,7 @@ cfg := loadConfig()
 	select {}
 }
 
+
 func loadConfig() Config {
 	port, _ := strconv.Atoi(getEnv("VPS_PORT", "7000"))
 
@@ -112,7 +142,7 @@ func loadConfig() Config {
 		VPSPort:   port,
 		AuthToken: getEnv("AUTH_TOKEN", "default-secret"),
 		Domain:    getEnv("DOMAIN", "localhost"),
-		DeviceID:  getOrGenerateDeviceID(), 
+		DeviceID:  getOrGenerateDeviceID(),
 	}
 }
 
@@ -124,24 +154,27 @@ func getEnv(key, fallback string) string {
 }
 
 func getOrGenerateDeviceID() string {
-	// On Linux Arm64 (Production), maybe store in /etc/strct/device-id
-	// For now, we store it in the local running folder.
 	fileName := "device-id.lock"
-	
-	// 3. Try to read existing file
+
 	content, err := os.ReadFile(fileName)
 	if err == nil {
 		return strings.TrimSpace(string(content))
 	}
 
-	// 4. Generate NEW ID if file doesn't exist
 	newID := "device-" + uuid.New().String()
-	
-	// 5. Save to disk so it persists after reboot
+
 	err = os.WriteFile(fileName, []byte(newID), 0644)
 	if err != nil {
 		log.Printf("[WARN] Could not save device ID to disk: %v", err)
 	}
 
 	return newID
+}
+
+func hasInternet() bool {
+	client := http.Client{
+		Timeout: 3 * time.Second,
+	}
+	_, err := client.Get("http://clients3.google.com/generate_204")
+	return err == nil
 }

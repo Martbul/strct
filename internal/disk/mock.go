@@ -30,3 +30,17 @@ func (d *MockDisk) Format() error {
 	fmt.Println("[MOCK DISK] Format Complete.")
 	return nil
 }
+
+func (d *MockDisk) EnsureMounted(mountPoint string) error {
+	fmt.Printf("[MOCK DISK] Ensuring %s is mounted to %s...\n", d.VirtualPath, mountPoint)
+	
+	time.Sleep(200 * time.Millisecond)
+	fmt.Println("[MOCK DISK] Checking /proc/mounts... (Simulated: Not mounted)")
+
+	fmt.Printf("[MOCK DISK] Creating directory %s...\n", mountPoint)
+
+	time.Sleep(500 * time.Millisecond)
+	fmt.Printf("[MOCK DISK] Mounted partition to %s successfully.\n", mountPoint)
+	
+	return nil
+}
