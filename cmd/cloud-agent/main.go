@@ -133,7 +133,6 @@ func main() {
 	select {}
 }
 
-
 func loadConfig() Config {
 	port, _ := strconv.Atoi(getEnv("VPS_PORT", "7000"))
 
