@@ -11,8 +11,6 @@ import (
 	"github.com/strct-org/strct-agent/internal/wifi"
 )
 
-// 1. Create a "Spy" Mock
-// This mock remembers what functions were called so we can verify them.
 type SpyWiFi struct {
 	HotspotStarted bool
 	ConnectCalled  bool
