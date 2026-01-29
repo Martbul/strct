@@ -89,9 +89,10 @@ func main() {
 	}
 
 	otaConfig := ota.Config{
-		CurrentVersion: "1.0.1",
+		CurrentVersion: "1.0.5",
 		StorageURL:     "https://portal.strct.org/updates",
 	}
+	
 	ota.StartUpdater(otaConfig)
 
 	diskMgr := disk.New(*devMode)

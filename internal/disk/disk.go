@@ -2,6 +2,7 @@ package disk
 
 import (
 	"log"
+	"os"
 	"runtime"
 )
 
@@ -11,7 +12,6 @@ type Manager interface {
 	EnsureMounted(mountPoint string) error
 }
 
-// New Factory.
 func New(devMode bool) Manager {
 	if devMode {
 		log.Println("[DISK] Factory: Returning MOCK Disk Manager")
@@ -22,10 +22,8 @@ func New(devMode bool) Manager {
 	}
 
 	if runtime.GOOS == "linux" {
-		path := "/dev/sdb" // Default (VM)
-		if runtime.GOARCH == "arm64" {
-			path = "/dev/nvme0n1" // Orange Pi
-		}
+		path := detectDevicePath()
+
 		log.Printf("[DISK] Factory: Returning REAL Disk Manager targeting %s", path)
 		return &RealDisk{
 			DevicePath: path,
@@ -37,4 +35,24 @@ func New(devMode bool) Manager {
 		VirtualPath: "VIRTUAL_NVME",
 		IsFormatted: false,
 	}
+}
+
+
+
+
+// detectDevicePath checks priority: NVMe -> sda -> sdb -> sdc -> sdd
+func detectDevicePath() string {
+	if _, err := os.Stat("/dev/nvme0n1"); err == nil {
+		return "/dev/nvme0n1"
+	}
+
+	possibleDrives := []string{"/dev/sda", "/dev/sdb", "/dev/sdc", "/dev/sdd"}
+
+	for _, path := range possibleDrives {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+
+	return "/dev/nvme0n1"
 }

@@ -20,7 +20,6 @@ type Config struct {
 }
 
 func StartUpdater(cfg Config) {
-	// check every 100 hours
 	ticker := time.NewTicker(100 * time.Hour)
 
 	// Check on startup
@@ -31,7 +30,6 @@ func StartUpdater(cfg Config) {
 	}()
 
 	// Infinite Loop
-
 	go func() {
 		for range ticker.C {
 			if err := checkForUpdate(cfg); err != nil {
@@ -43,9 +41,6 @@ func StartUpdater(cfg Config) {
 
 func checkForUpdate(cfg Config) error {
 	log.Println("OTA: Checking for updates...")
-
-	// Get the latest version from the server
-	// It downloads a tiny file "version.txt" containing e.g., "1.0.1"
 
 	resp, err := http.Get(fmt.Sprintf("%s/version.txt", cfg.StorageURL))
 	if err != nil {
@@ -75,7 +70,7 @@ func checkForUpdate(cfg Config) error {
 	log.Printf("OTA: New version found: %s. Downloading...", vRemote)
 
 	// define the binary name based on architecture
-	binName := fmt.Sprintf("myapp-%s-%s", runtime.GOOS, runtime.GOARCH)
+	binName := fmt.Sprintf("strct-agent-%s-%s", runtime.GOOS, runtime.GOARCH)
 	binURL := fmt.Sprintf("%s/%s", cfg.StorageURL, binName)
 	checksumURL := binURL + ".sha256"
 
