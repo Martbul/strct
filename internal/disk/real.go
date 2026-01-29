@@ -16,10 +16,11 @@ type lsblkOutput struct {
 }
 
 type blockDevice struct {
-	Name     string        `json:"name"`
-	Size     string        `json:"size"`
-	Type     string        `json:"type"`
-	Children []blockDevice `json:"children,omitempty"`
+	Name       string        `json:"name"`
+	Size       string        `json:"size"`
+	Type       string        `json:"type"`
+	Mountpoint string        `json:"mountpoint"`
+	Children   []blockDevice `json:"children,omitempty"`
 }
 
 func (d *RealDisk) GetStatus() (string, error) {
@@ -88,7 +89,6 @@ func (d *RealDisk) EnsureMounted(mountPoint string) error {
 	}
 	return nil
 }
-
 
 // NVMe drives use "p1" (nvme0n1p1)
 // USB/SATA drives use "1" (sda1)
