@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"github.com/strct-org/strct-agent/internal/disk"
+	"github.com/strct-org/strct-agent/internal/fileserver"
 	"github.com/strct-org/strct-agent/internal/ota"
 	"github.com/strct-org/strct-agent/internal/setup"
 	"github.com/strct-org/strct-agent/internal/tunnel"
@@ -102,14 +103,27 @@ func main() {
 		log.Printf("[DISK] Status: %s", status)
 	}
 
-	dataDir := "./data"
-	if runtime.GOARCH == "arm64" {
-		dataDir = "/mnt/data"
-	}
+	  dataDir := "./data"
+    if !*devMode && runtime.GOARCH == "arm64" {
+        dataDir = "/mnt/data"
+    }
+
+    if *devMode {
+        os.MkdirAll(dataDir, 0755)
+    }
 
 	if err := diskMgr.EnsureMounted(dataDir); err != nil {
 		log.Printf("[DISK] CRITICAL: Failed to mount disk: %v", err)
 	}
+
+
+	if err := diskMgr.EnsureMounted(dataDir); err != nil {
+		log.Printf("[DISK] CRITICAL: Failed to mount disk: %v", err)
+	}
+
+	log.Printf("[SYSTEM] Starting Native File Server (Data: %s)...", dataDir)
+	
+	go fileserver.Start(dataDir, 80)
 
 	tunnelConfig := tunnel.TunnelConfig{
 		ServerIP:   cfg.VPSIP,
