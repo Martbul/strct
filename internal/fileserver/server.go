@@ -20,7 +20,6 @@ type Server struct {
 	StartTime time.Time
 }
 
-// JSON Response structures to match React
 type StatusResponse struct {
 	IsOnline bool   `json:"isOnline"`
 	Used     uint64 `json:"used"`   // Bytes

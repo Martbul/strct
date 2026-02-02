@@ -76,7 +76,7 @@ func main() {
 		go setup.StartCaptivePortal(wifiManager, done, *devMode)
 
 		log.Println("[SETUP] Web Server running. Waiting for user credentials...")
-		<-done // BLOCK HERE until user connects
+		<-done // BLOCK until user connects
 
 		log.Println("[SETUP] Credentials received. Stopping Hotspot and connecting...")
 		wifiManager.StopHotspot()
@@ -155,7 +155,7 @@ func loadConfig(devMode bool) Config {
 		VPSPort:   port,
 		AuthToken: getEnv("AUTH_TOKEN", "default-secret"),
 		Domain:    getEnv("DOMAIN", "localhost"),
-		DeviceID:  getOrGenerateDeviceID(devMode), // Pass it down
+		DeviceID:  getOrGenerateDeviceID(devMode), 
 	}
 }
 
@@ -168,37 +168,28 @@ func getEnv(key, fallback string) string {
 }
 
 
-// CHANGED: Logic to handle Dev vs Prod paths
 func getOrGenerateDeviceID(devMode bool) string {
 	var filePath string
 
 	if devMode {
-		// In Dev mode, save to the current working directory
-		// This ensures permissions issues don't block saving
 		filePath = "device-id.lock"
 	} else {
-		// In Production, use the system path
 		filePath = "/etc/strct/device-id.lock"
 	}
 
-	// 1. Try to read existing ID
 	content, err := os.ReadFile(filePath)
 	if err == nil {
-		// ID found! Return it.
 		return strings.TrimSpace(string(content))
 	}
 
-	// 2. Generate New ID
 	newID := "device-" + uuid.New().String()
 	log.Printf("[INIT] New Device ID generated: %s", newID)
 
-	// 3. Ensure Directory exists (Critical for /etc/strct/)
 	dir := filepath.Dir(filePath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		log.Printf("[WARN] Could not create directory %s: %v", dir, err)
 	}
 
-	// 4. Save to disk
 	err = os.WriteFile(filePath, []byte(newID), 0644)
 	if err != nil {
 		log.Printf("[WARN] Could not save device ID to disk at %s: %v", filePath, err)
@@ -218,7 +209,6 @@ func hasInternet() bool {
 }
 
 func getMacDetails() (string, string) {
-	// Try to get wlan0, fallback to first available
 	ifas, err := net.Interfaces()
 	if err != nil {
 		return "XXXX", "00:00:00:00:00:00"
@@ -227,7 +217,6 @@ func getMacDetails() (string, string) {
 	for _, ifa := range ifas {
 		if ifa.Name == "wlan0" && len(ifa.HardwareAddr) > 0 {
 			mac := ifa.HardwareAddr.String()
-			// clean it up (remove colons)
 			cleanMac := strings.ReplaceAll(mac, ":", "")
 			cleanMac = strings.ToUpper(cleanMac)
 
