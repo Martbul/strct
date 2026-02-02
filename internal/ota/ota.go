@@ -25,7 +25,7 @@ func StartUpdater(cfg Config) {
 	// Check on startup
 	go func() {
 		if err := checkForUpdate(cfg); err != nil {
-			log.Printf("OTA: Update check failed: %v", err)
+			// log.Printf("OTA: Update check failed: %v", err)
 		}
 	}()
 

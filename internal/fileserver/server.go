@@ -1,5 +1,4 @@
-//! curently using direct architecture(getting req directly from the portal), the req should come throght the API
- package fileserver
+package fileserver
 
 import (
 	"encoding/json"
@@ -10,70 +9,115 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
+
+	"github.com/strct-org/strct-agent/utils"
 )
 
 type Server struct {
-	RootPath string
+	RootPath  string
+	StartTime time.Time
 }
 
-func Start(rootPath string, port int) {
-	// Ensure root directory exists
-	if err := os.MkdirAll(rootPath, 0755); err != nil {
+// JSON Response structures to match React
+type StatusResponse struct {
+	IsOnline bool   `json:"isOnline"`
+	Used     uint64 `json:"used"`   // Bytes
+	Total    uint64 `json:"total"`  // Bytes
+	IP       string `json:"ip"`
+	Uptime   int64  `json:"uptime"` // Seconds
+}
+
+type FilesResponse struct {
+	Files []FileItem `json:"files"`
+}
+
+type FileItem struct {
+	Name       string `json:"name"`
+	Size       string `json:"size"` 
+	Type       string `json:"type"` 
+	ModifiedAt string `json:"modifiedAt"`
+}
+
+func Start(rootPath string, port int, dev bool) {
+	absPath, err := filepath.Abs(rootPath)
+	if err != nil {
+		absPath = filepath.Clean(rootPath)
+	}
+
+	if err := os.MkdirAll(absPath, 0755); err != nil {
 		log.Printf("[FILESERVER] Error creating root path: %v", err)
 	}
 
-	srv := &Server{RootPath: rootPath}
+	srv := &Server{
+		RootPath:  absPath,
+		StartTime: time.Now(),
+	}
+
+	finalPort := port
+	if dev {
+		if port <= 1024 {
+			log.Printf("[FILESERVER] Dev Mode detected: Switching from privileged port %d to 8080", port)
+			finalPort = 8080
+		}
+	}
 
 	mux := http.NewServeMux()
 
-	// 1. API Endpoints (JSON)
-	mux.HandleFunc("/api/fs/list", srv.handleList)
-	mux.HandleFunc("/api/fs/upload", srv.handleUpload)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<h1>Strct Agent is Online</h1><p>API endpoints: /api/status, /api/files</p>"))
+	})
 
-	// 2. Raw File Serving
-	// Strip "/files/" prefix so url "/files/foo.jpg" -> looks for "foo.jpg" on disk
-	fileHandler := http.StripPrefix("/files/", http.FileServer(http.Dir(rootPath)))
+	mux.HandleFunc("/api/status", srv.handleStatus)
+
+	mux.HandleFunc("/api/files", srv.handleFiles) 
+	
+	mux.HandleFunc("/strct_agent/fs/upload", srv.handleUpload)
+
+	fileHandler := http.StripPrefix("/files/", http.FileServer(http.Dir(absPath)))
 	mux.Handle("/files/", fileHandler)
 
-	log.Printf("[FILESERVER] Starting Native Server on port %d serving %s", port, rootPath)
+	log.Printf("[FILESERVER] Starting Native Server on port %d serving %s (Dev: %v)", finalPort, absPath, dev)
 
-	// 3. Wrap everything in CORS so portal.strct.org can talk to us
 	handlerWithCors := corsMiddleware(mux)
 
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), handlerWithCors); err != nil {
+	if err := http.ListenAndServe(fmt.Sprintf(":%d", finalPort), handlerWithCors); err != nil {
 		log.Printf("[FILESERVER] Error: %v", err)
 	}
 }
 
 
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		
-		allowedOrigins := map[string]bool{
-			"https://portal.strct.org":     true,
-			"https://dev.portal.strct.org": true,
-			"http://localhost:3001":        true, 
-		}
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	var stat syscall.Statfs_t
+	var total, free, used uint64
 
-		if allowedOrigins[origin] {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-		}
+	if err := syscall.Statfs(s.RootPath, &stat); err == nil {
+		total = stat.Blocks * uint64(stat.Bsize)
+		free = stat.Bfree * uint64(stat.Bsize)
+		used = total - free
+	}
 
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	// 2. Get Local IP
+	localIP := utils.GetOutboundIP()
 
-		// If this is a preflight check, return OK immediately
-		if r.Method == "OPTIONS" {
-			return
-		}
+	// 3. Calculate Uptime
+	uptime := int64(time.Since(s.StartTime).Seconds())
 
-		next.ServeHTTP(w, r)
-	})
+	resp := StatusResponse{
+		IsOnline: true,
+		Used:     used,
+		Total:    total,
+		IP:       localIP,
+		Uptime:   uptime,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
-
-func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	// Security: Ensure path is valid
 	reqPath := r.URL.Query().Get("path")
 	fullPath, err := secureJoin(s.RootPath, reqPath)
@@ -84,44 +128,49 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := os.ReadDir(fullPath)
 	if err != nil {
-		http.Error(w, "Directory not found", http.StatusNotFound)
+		// If folder doesn't exist, return empty list instead of 404 to prevent React errors
+		json.NewEncoder(w).Encode(FilesResponse{Files: []FileItem{}})
 		return
 	}
 
-	var response []map[string]interface{}
+	var fileList []FileItem
 	for _, e := range entries {
-		info, _ := e.Info()
-		fileType := "file"
-		if e.IsDir() {
-			fileType = "dir"
+		info, err := e.Info()
+		if err != nil {
+			continue
 		}
 
-		response = append(response, map[string]interface{}{
-			"name": e.Name(),
-			"size": info.Size(),
-			"type": fileType,
+		fileType := "file"
+		if e.IsDir() {
+			fileType = "folder" // Changed to match React's "folder" (was "dir")
+		}
+
+		fileList = append(fileList, FileItem{
+			Name:       e.Name(),
+			Size:       utils.FormatBytes(info.Size()), // Convert bytes to string (e.g. "1.2 MB") or just stringified int
+			Type:       fileType,
+			ModifiedAt: info.ModTime().Format(time.RFC3339),
 		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	json.NewEncoder(w).Encode(FilesResponse{Files: fileList})
 }
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", 405)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	targetDir := r.URL.Query().Get("path")
 	saveDir, err := secureJoin(s.RootPath, targetDir)
 	if err != nil {
-		http.Error(w, "Access Denied", 403)
+		http.Error(w, "Access Denied", http.StatusForbidden)
 		return
 	}
 
-	// Limit memory usage for upload parsing (32MB RAM), rest on disk
-	r.ParseMultipartForm(32 << 20)
+	r.ParseMultipartForm(32 << 20) // 32MB RAM limit
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
@@ -138,17 +187,47 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer dst.Close()
 
+
 	io.Copy(dst, file)
 	w.Write([]byte("Uploaded"))
 }
 
-// Helper to prevent Directory Traversal (e.g. "../../../etc/passwd")
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+
+		allowedOrigins := map[string]bool{
+			"https://portal.strct.org":     true,
+			"https://dev.portal.strct.org": true,
+			"http://localhost:3001":        true,
+			"http://localhost:3000":        true, 
+		}
+
+		if allowedOrigins[origin] {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func secureJoin(root, userPath string) (string, error) {
 	if userPath == "" {
 		userPath = "/"
 	}
 	clean := filepath.Clean(filepath.Join("/", userPath))
 	full := filepath.Join(root, clean)
+	
 	if !strings.HasPrefix(full, root) {
 		return "", fmt.Errorf("path traversal attempt")
 	}

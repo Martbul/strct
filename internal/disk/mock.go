@@ -26,7 +26,7 @@ func (d *MockDisk) Format() error {
 	fmt.Println("[MOCK DISK] Running mkfs.ext4...")
 	time.Sleep(2 * time.Second)
 	
-	d.IsFormatted = true // Update state in memory
+	d.IsFormatted = true 
 	fmt.Println("[MOCK DISK] Format Complete.")
 	return nil
 }

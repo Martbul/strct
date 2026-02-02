@@ -26,10 +26,7 @@ name = "web_{{.DeviceID}}"
 type = "http"
 localPort = {{.LocalPort}}
 
-# --- CHANGE IS HERE ---
-# Do NOT use customDomains. Use subdomain.
 subdomain = "{{.DeviceID}}"
-# ----------------------
 `
 
 func StartTunnel(cfg TunnelConfig) error {

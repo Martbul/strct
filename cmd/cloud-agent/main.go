@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -34,13 +35,12 @@ func main() {
 	flag.Parse()
 
 	log.Println("--- Strct Agent Starting ---")
-	log.Println("--- Latest Check ---")
 
 	if err := godotenv.Load(); err != nil {
 		log.Println("[CONFIG] No .env file found, relying on system env vars")
 	}
 
-	cfg := loadConfig()
+	cfg := loadConfig(*devMode)
 	log.Printf("[INIT] Device ID: %s", cfg.DeviceID)
 	log.Printf("[INIT] Target VPS: %s:%d", cfg.VPSIP, cfg.VPSPort)
 	log.Printf("[INIT] Domain: %s", cfg.Domain)
@@ -56,7 +56,7 @@ func main() {
 	}
 
 	if !hasInternet() {
-		log.Println("[INIT] No Internet detected. Entering SETUP MODE.")
+		log.Println("[INIT] No Internet detected")
 
 		macSuffix, fullMac := getMacDetails()
 
@@ -82,13 +82,13 @@ func main() {
 		wifiManager.StopHotspot()
 
 		// switch modes
-		time.Sleep(5 * time.Second)
+		time.Sleep(2 * time.Second)
 	} else {
 		log.Println("[INIT] Internet detected. Skipping setup.")
 	}
 
 	otaConfig := ota.Config{
-		CurrentVersion: "1.0.5",
+		CurrentVersion: "1.0.9",
 		StorageURL:     "https://portal.strct.org/updates",
 	}
 
@@ -116,21 +116,16 @@ func main() {
 		log.Printf("[DISK] CRITICAL: Failed to mount disk: %v", err)
 	}
 
-
-	if err := diskMgr.EnsureMounted(dataDir); err != nil {
-		log.Printf("[DISK] CRITICAL: Failed to mount disk: %v", err)
-	}
-
 	log.Printf("[SYSTEM] Starting Native File Server (Data: %s)...", dataDir)
 	
-	go fileserver.Start(dataDir, 80)
+	go fileserver.Start(dataDir, 8080, *devMode)
 
 	tunnelConfig := tunnel.TunnelConfig{
 		ServerIP:   cfg.VPSIP,
 		ServerPort: cfg.VPSPort,
 		Token:      cfg.AuthToken,
 		DeviceID:   cfg.DeviceID,
-		LocalPort:  80,
+		LocalPort:  8080,
 		BaseDomain: cfg.Domain,
 	}
 
@@ -152,7 +147,7 @@ func main() {
 	select {}
 }
 
-func loadConfig() Config {
+func loadConfig(devMode bool) Config {
 	port, _ := strconv.Atoi(getEnv("VPS_PORT", "7000"))
 
 	return Config{
@@ -160,9 +155,10 @@ func loadConfig() Config {
 		VPSPort:   port,
 		AuthToken: getEnv("AUTH_TOKEN", "default-secret"),
 		Domain:    getEnv("DOMAIN", "localhost"),
-		DeviceID:  getOrGenerateDeviceID(),
+		DeviceID:  getOrGenerateDeviceID(devMode), // Pass it down
 	}
 }
+
 
 func getEnv(key, fallback string) string {
 	if value, exists := os.LookupEnv(key); exists {
@@ -171,19 +167,43 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-func getOrGenerateDeviceID() string {
-	fileName := "/etc/strct/device-id.lock"
 
-	content, err := os.ReadFile(fileName)
+// CHANGED: Logic to handle Dev vs Prod paths
+func getOrGenerateDeviceID(devMode bool) string {
+	var filePath string
+
+	if devMode {
+		// In Dev mode, save to the current working directory
+		// This ensures permissions issues don't block saving
+		filePath = "device-id.lock"
+	} else {
+		// In Production, use the system path
+		filePath = "/etc/strct/device-id.lock"
+	}
+
+	// 1. Try to read existing ID
+	content, err := os.ReadFile(filePath)
 	if err == nil {
+		// ID found! Return it.
 		return strings.TrimSpace(string(content))
 	}
 
+	// 2. Generate New ID
 	newID := "device-" + uuid.New().String()
+	log.Printf("[INIT] New Device ID generated: %s", newID)
 
-	err = os.WriteFile(fileName, []byte(newID), 0644)
+	// 3. Ensure Directory exists (Critical for /etc/strct/)
+	dir := filepath.Dir(filePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Printf("[WARN] Could not create directory %s: %v", dir, err)
+	}
+
+	// 4. Save to disk
+	err = os.WriteFile(filePath, []byte(newID), 0644)
 	if err != nil {
-		log.Printf("[WARN] Could not save device ID to disk: %v", err)
+		log.Printf("[WARN] Could not save device ID to disk at %s: %v", filePath, err)
+	} else {
+		log.Printf("[INIT] Device ID saved to %s", filePath)
 	}
 
 	return newID
