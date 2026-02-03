@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -51,32 +53,24 @@ func detectDevicePath() (string, error) {
 		return "", err
 	}
 
-	// We reuse the structs defined in real.go (lsblkOutput, blockDevice)
-	// because we are in the same 'package disk'
 	var data lsblkOutput
 	if err := json.Unmarshal(output, &data); err != nil {
 		return "", err
 	}
 
 	for _, dev := range data.Blockdevices {
-		// 1. Filter out Loopback (snaps), ROM (cd), and RAM disks
 		if dev.Type == "loop" || dev.Type == "rom" || dev.Name == "sr0" {
 			continue
 		}
 
-		// 2. Filter out the SD Card / eMMC
-		// Raspberry Pi/Orange Pi SD cards usually start with "mmcblk"
 		if strings.HasPrefix(dev.Name, "mmcblk") {
 			continue
 		}
 
-		// 3. Double Check: Skip if it's the system root drive
-		// (In case you booted from USB, we don't want to format the OS drive)
 		isSystem := false
 		if dev.Mountpoint == "/" {
 			isSystem = true
 		}
-		// Check partitions (children) for root mount
 		for _, child := range dev.Children {
 			if child.Mountpoint == "/" {
 				isSystem = true
@@ -88,11 +82,28 @@ func detectDevicePath() (string, error) {
 			continue
 		}
 
-		// If we survived the filters, this is likely our target drive
 		return "/dev/" + dev.Name, nil
 	}
 
-	var noExternalDriveError = errors.New("No suitable external drive found")
+	var noExternalDriveError = errors.New("no suitable external drive found")
 
-	return "", noExternalDriveError // generic error
+	return "", noExternalDriveError 
+}
+
+
+func GetDirSize(path string) (uint64, error) {
+	var size int64
+	err := filepath.WalkDir(path, func(_ string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			info, err := d.Info()
+			if err == nil {
+				size += info.Size()
+			}
+		}
+		return nil
+	})
+	return uint64(size), err
 }

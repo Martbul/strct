@@ -14,6 +14,7 @@ require (
 
 require (
 	aead.dev/minisign v0.2.0 // indirect
+	github.com/go-ping/ping v1.2.0 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/mod v0.31.0 // indirect
 	golang.org/x/net v0.48.0 // indirect

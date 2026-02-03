@@ -12,20 +12,27 @@ import (
 	"syscall"
 	"time"
 
+	// Make sure these paths match your actual project structure
+	"github.com/strct-org/strct-agent/internal/platform/disk"
 	"github.com/strct-org/strct-agent/utils"
 )
 
-type Server struct {
-	RootPath  string
+// FileServer holds both configuration and runtime state
+type FileServer struct {
+	DataDir   string
+	Port      int
+	IsDev     bool
 	StartTime time.Time
 }
 
+// --- JSON Response Structs ---
+
 type StatusResponse struct {
-	IsOnline bool   `json:"isOnline"`
-	Used     uint64 `json:"used"`  // Bytes
-	Total    uint64 `json:"total"` // Bytes
+	Uptime   int64  `json:"uptime"`
+	Used     uint64 `json:"used"`
+	Total    uint64 `json:"total"`
 	IP       string `json:"ip"`
-	Uptime   int64  `json:"uptime"` // Seconds
+	IsOnline bool   `json:"isOnline"`
 }
 
 type FilesResponse struct {
@@ -39,29 +46,47 @@ type FileItem struct {
 	ModifiedAt string `json:"modifiedAt"`
 }
 
-func Start(rootPath string, port int, dev bool) {
-	absPath, err := filepath.Abs(rootPath)
+// --- Constructor ---
+
+func New(dataDir string, port int, isDev bool) *FileServer {
+	return &FileServer{
+		DataDir: dataDir,
+		Port:    port,
+		IsDev:   isDev,
+		// StartTime will be set when Start() is called
+	}
+}
+
+// --- Service Interface Implementation ---
+
+func (s *FileServer) Start() error {
+	// 1. Resolve Absolute Path
+	absPath, err := filepath.Abs(s.DataDir)
 	if err != nil {
-		absPath = filepath.Clean(rootPath)
+		absPath = filepath.Clean(s.DataDir)
 	}
+	// Update struct to use the absolute path for all handlers
+	s.DataDir = absPath
 
-	if err := os.MkdirAll(absPath, 0755); err != nil {
+	// 2. Ensure Directory Exists
+	if err := os.MkdirAll(s.DataDir, 0755); err != nil {
 		log.Printf("[FILESERVER] Error creating root path: %v", err)
+		return err
 	}
 
-	srv := &Server{
-		RootPath:  absPath,
-		StartTime: time.Now(),
-	}
+	// 3. Set Start Time
+	s.StartTime = time.Now()
 
-	finalPort := port
-	if dev {
-		if port <= 1024 {
-			log.Printf("[FILESERVER] Dev Mode detected: Switching from privileged port %d to 8080", port)
+	// 4. Determine Port (Dev Mode Override)
+	finalPort := s.Port
+	if s.IsDev {
+		if s.Port <= 1024 {
+			log.Printf("[FILESERVER] Dev Mode detected: Switching from privileged port %d to 8080", s.Port)
 			finalPort = 8080
 		}
 	}
 
+	// 5. Setup Router
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -69,54 +94,51 @@ func Start(rootPath string, port int, dev bool) {
 		w.Write([]byte("<h1>Strct Agent is Online</h1><p>API endpoints: /api/status, /api/files</p>"))
 	})
 
-	mux.HandleFunc("/api/status", srv.handleStatus)
+	// API Routes
+	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/api/files", s.handleFiles)
+	mux.HandleFunc("/api/mkdir", s.handleMkdir)
+	mux.HandleFunc("/api/delete", s.handleDelete)
+	mux.HandleFunc("/strct_agent/fs/upload", s.handleUpload)
 
-	mux.HandleFunc("/api/files", srv.handleFiles)
-	mux.HandleFunc("/api/mkdir", srv.handleMkdir)
-	mux.HandleFunc("/api/delete", srv.handleDelete)
-	mux.HandleFunc("/strct_agent/fs/upload", srv.handleUpload)
-
-	fileHandler := http.StripPrefix("/files/", http.FileServer(http.Dir(absPath)))
+	// Static File Serving
+	fileHandler := http.StripPrefix("/files/", http.FileServer(http.Dir(s.DataDir)))
 	mux.Handle("/files/", fileHandler)
 
-	log.Printf("[FILESERVER] Starting Native Server on port %d serving %s (Dev: %v)", finalPort, absPath, dev)
+	log.Printf("[FILESERVER] Starting Native Server on port %d serving %s (Dev: %v)", finalPort, s.DataDir, s.IsDev)
 
+	// 6. Wrap with Middleware
 	handlerWithCors := corsMiddleware(mux)
 
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", finalPort), handlerWithCors); err != nil {
-		log.Printf("[FILESERVER] Error: %v", err)
-	}
+	// 7. Start Listening (Returns error if it fails, which logs in app.go)
+	return http.ListenAndServe(fmt.Sprintf(":%d", finalPort), handlerWithCors)
 }
 
-func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	// 1. Get Real Free Space from the Disk (Hard Limit)
+// --- Handlers ---
+
+func (s *FileServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	var stat syscall.Statfs_t
 	var realFree uint64
 
-	if err := syscall.Statfs(s.RootPath, &stat); err == nil {
-		// Bavail is usually better than Bfree for "usable" space for non-root users
+	// Note: syscall.Statfs is Linux/Unix only. On Windows this will fail.
+	if err := syscall.Statfs(s.DataDir, &stat); err == nil {
 		realFree = stat.Bavail * uint64(stat.Bsize)
 	}
 
-	// 2. Get Actual Size of User Data (The "data" folder)
-	userUsed, err := getDirSize(s.RootPath)
+	userUsed, err := disk.GetDirSize(s.DataDir)
 	if err != nil {
 		log.Printf("Error calculating dir size: %v", err)
 	}
 
-	// 3. Calculate "Virtual Total"
-	// We tell the UI that Total = (What user has used) + (What is actually left)
-	// This hides the OS/System usage from the progress bar.
 	virtualTotal := userUsed + realFree
 
-	// 4. Get Other Info
 	localIP := utils.GetOutboundIP()
 	uptime := int64(time.Since(s.StartTime).Seconds())
 
 	resp := StatusResponse{
 		IsOnline: true,
-		Used:     userUsed,     // Will show exactly what is in the folder (e.g., 0B or 1.2GB)
-		Total:    virtualTotal, // Will scale dynamically so the "Free" space is accurate
+		Used:     userUsed,
+		Total:    virtualTotal,
 		IP:       localIP,
 		Uptime:   uptime,
 	}
@@ -125,10 +147,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
-	// Security: Ensure path is valid
+func (s *FileServer) handleFiles(w http.ResponseWriter, r *http.Request) {
 	reqPath := r.URL.Query().Get("path")
-	fullPath, err := secureJoin(s.RootPath, reqPath)
+	fullPath, err := secureJoin(s.DataDir, reqPath)
 	if err != nil {
 		http.Error(w, "Access Denied", http.StatusForbidden)
 		return
@@ -136,7 +157,6 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := os.ReadDir(fullPath)
 	if err != nil {
-		// If folder doesn't exist, return empty list instead of 404 to prevent React errors
 		json.NewEncoder(w).Encode(FilesResponse{Files: []FileItem{}})
 		return
 	}
@@ -150,12 +170,12 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 
 		fileType := "file"
 		if e.IsDir() {
-			fileType = "folder" // Changed to match React's "folder" (was "dir")
+			fileType = "folder"
 		}
 
 		fileList = append(fileList, FileItem{
 			Name:       e.Name(),
-			Size:       utils.FormatBytes(info.Size()), // Convert bytes to string (e.g. "1.2 MB") or just stringified int
+			Size:       utils.FormatBytes(info.Size()),
 			Type:       fileType,
 			ModifiedAt: info.ModTime().Format(time.RFC3339),
 		})
@@ -165,20 +185,94 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(FilesResponse{Files: fileList})
 }
 
-func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+func (s *FileServer) handleMkdir(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Path string `json:"path"`
+		Name string `json:"name"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.Name == "" || strings.Contains(req.Name, "/") || strings.Contains(req.Name, "\\") {
+		http.Error(w, "Invalid folder name", http.StatusBadRequest)
+		return
+	}
+
+	parentDir, err := secureJoin(s.DataDir, req.Path)
+	if err != nil {
+		http.Error(w, "Access Denied", http.StatusForbidden)
+		return
+	}
+
+	newFolderPath := filepath.Join(parentDir, req.Name)
+
+	if err := os.Mkdir(newFolderPath, 0755); err != nil {
+		if os.IsExist(err) {
+			http.Error(w, "Folder already exists", http.StatusConflict)
+			return
+		}
+		log.Printf("Error creating folder: %v", err)
+		http.Error(w, "Could not create folder", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "created"})
+}
+
+func (s *FileServer) handleDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "DELETE" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	targetPath := r.URL.Query().Get("path")
+
+	fullPath, err := secureJoin(s.DataDir, targetPath)
+	if err != nil {
+		http.Error(w, "Access Denied", http.StatusForbidden)
+		return
+	}
+
+	// Prevent deleting the root data folder
+	if fullPath == s.DataDir {
+		http.Error(w, "Cannot delete root directory", http.StatusForbidden)
+		return
+	}
+
+	if err := os.RemoveAll(fullPath); err != nil {
+		log.Printf("Error deleting %s: %v", fullPath, err)
+		http.Error(w, "Could not delete item", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Deleted"))
+}
+
+func (s *FileServer) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	targetDir := r.URL.Query().Get("path")
-	saveDir, err := secureJoin(s.RootPath, targetDir)
+	saveDir, err := secureJoin(s.DataDir, targetDir)
 	if err != nil {
 		http.Error(w, "Access Denied", http.StatusForbidden)
 		return
 	}
 
-	r.ParseMultipartForm(32 << 20) // 32MB RAM limit
+	// Limit upload size in RAM (32MB), rest goes to temp disk
+	r.ParseMultipartForm(32 << 20)
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
@@ -198,6 +292,8 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	io.Copy(dst, file)
 	w.Write([]byte("Uploaded"))
 }
+
+// --- Helpers ---
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -238,95 +334,4 @@ func secureJoin(root, userPath string) (string, error) {
 		return "", fmt.Errorf("path traversal attempt")
 	}
 	return full, nil
-}
-
-func getDirSize(path string) (uint64, error) {
-	var size int64
-	err := filepath.WalkDir(path, func(_ string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() {
-			info, err := d.Info()
-			if err == nil {
-				size += info.Size()
-			}
-		}
-		return nil
-	})
-	return uint64(size), err
-}
-
-
-func (s *Server) handleMkdir(w http.ResponseWriter, r *http.Request) {
-    if r.Method != "POST" {
-        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-        return
-    }
-
-    var req struct {
-        Path string `json:"path"`
-        Name string `json:"name"`
-    }
-    
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        http.Error(w, "Invalid JSON", http.StatusBadRequest)
-        return
-    }
-
-    if req.Name == "" || strings.Contains(req.Name, "/") || strings.Contains(req.Name, "\\") {
-        http.Error(w, "Invalid folder name", http.StatusBadRequest)
-        return
-    }
-
-    parentDir, err := secureJoin(s.RootPath, req.Path)
-    if err != nil {
-        http.Error(w, "Access Denied", http.StatusForbidden)
-        return
-    }
-
-    newFolderPath := filepath.Join(parentDir, req.Name)
-
-    if err := os.Mkdir(newFolderPath, 0755); err != nil {
-        if os.IsExist(err) {
-            http.Error(w, "Folder already exists", http.StatusConflict)
-            return
-        }
-        log.Printf("Error creating folder: %v", err)
-        http.Error(w, "Could not create folder", http.StatusInternalServerError)
-        return
-    }
-
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(map[string]string{"status": "created"})
-}
-
-
-func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "DELETE" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	targetPath := r.URL.Query().Get("path")
-	
-	fullPath, err := secureJoin(s.RootPath, targetPath)
-	if err != nil {
-		http.Error(w, "Access Denied", http.StatusForbidden)
-		return
-	}
-
-	if fullPath == s.RootPath {
-		http.Error(w, "Cannot delete root directory", http.StatusForbidden)
-		return
-	}
-
-	if err := os.RemoveAll(fullPath); err != nil {
-		log.Printf("Error deleting %s: %v", fullPath, err)
-		http.Error(w, "Could not delete item", http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Deleted"))
 }

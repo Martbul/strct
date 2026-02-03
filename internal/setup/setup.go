@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"github.com/strct-org/strct-agent/internal/wifi"
+
+	"github.com/strct-org/strct-agent/internal/platform/wifi"
 )
 
 type Credentials struct {

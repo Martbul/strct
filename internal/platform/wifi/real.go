@@ -52,20 +52,12 @@ func (w *RealWiFi) Connect(ssid, password string) error {
 func (w *RealWiFi) StartHotspot(ssid, password string) error {
 	fmt.Printf("[WIFI] Configuring Hotspot: %s (Force 2.4GHz)\n", ssid)
 
-	// 1. Clean up old connections
 	exec.Command("nmcli", "con", "delete", "Hotspot").Run()
 
-	// 2. Create a new connection profile explicitly
-	// type: wifi
-	// ifname: wlan0
-	// con-name: Hotspot
-	// autoconnect: yes
-	// ssid: <your-ssid>
 	if err := exec.Command("nmcli", "con", "add", "type", "wifi", "ifname", w.Interface, "con-name", "Hotspot", "autoconnect", "yes", "ssid", ssid).Run(); err != nil {
 		return fmt.Errorf("failed to add connection: %v", err)
 	}
 
-	// 3. Set Security (WPA2)
 	if err := exec.Command("nmcli", "con", "modify", "Hotspot", "wifi-sec.key-mgmt", "wpa-psk").Run(); err != nil {
 		return fmt.Errorf("failed to set security type: %v", err)
 	}
@@ -73,7 +65,6 @@ func (w *RealWiFi) StartHotspot(ssid, password string) error {
 		return fmt.Errorf("failed to set password: %v", err)
 	}
 
-	// 4. FORCE 2.4GHz (Band bg) -> This fixes the visibility issue
 	if err := exec.Command("nmcli", "con", "modify", "Hotspot", "802-11-wireless.mode", "ap").Run(); err != nil {
 		return fmt.Errorf("failed to set AP mode: %v", err)
 	}
@@ -81,12 +72,10 @@ func (w *RealWiFi) StartHotspot(ssid, password string) error {
 		return fmt.Errorf("failed to set band to 2.4GHz: %v", err)
 	}
 
-	// 5. Set IP Method to Shared (Creates Gateway at 10.42.0.1 automatically)
 	if err := exec.Command("nmcli", "con", "modify", "Hotspot", "ipv4.method", "shared").Run(); err != nil {
 		return fmt.Errorf("failed to set ipv4 shared: %v", err)
 	}
 
-	// 6. Start the connection
 	fmt.Println("[WIFI] Bringing up Hotspot...")
 	if output, err := exec.Command("nmcli", "con", "up", "Hotspot").CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to bring up hotspot: %s, %v", string(output), err)
