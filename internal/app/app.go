@@ -9,7 +9,7 @@ import (
 	"github.com/strct-org/strct-agent/internal/api"
 	"github.com/strct-org/strct-agent/internal/config"
 	"github.com/strct-org/strct-agent/internal/features/cloud"
-	"github.com/strct-org/strct-agent/internal/features/monitor"
+	monitor "github.com/strct-org/strct-agent/internal/features/network_monitor"
 	"github.com/strct-org/strct-agent/internal/network/dns"
 	"github.com/strct-org/strct-agent/internal/network/tunnel"
 	"github.com/strct-org/strct-agent/internal/platform/wifi"
@@ -103,6 +103,7 @@ a.Services = []Service{
 		apiSvc,                  // Unified HTTP Server (Cloud + Monitor)
 	}
 }
+
 
 func (a *Agent) Start() {
 	var wg sync.WaitGroup

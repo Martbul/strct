@@ -159,8 +159,7 @@ func (m *NetworkMonitor) reportToBackend(stats MonitorStats) {
 		return
 	}
 
-	// Construct URL: e.g., https://api.strct.org/v1/devices/{deviceID}/metrics
-	url := fmt.Sprintf("%s/v1/devices/%s/metrics", m.Config.BackendURL, m.Config.DeviceID)
+	url := fmt.Sprintf("%s/api/v1/device/agent/%s/network_metrics", m.Config.BackendURL, m.Config.DeviceID)
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
 	if err != nil {
@@ -169,7 +168,8 @@ func (m *NetworkMonitor) reportToBackend(stats MonitorStats) {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+m.Config.AuthToken)
+	req.Header.Set("Authorization", "Bearer "+m.Config.AuthToken) //! the auth token is for the frp tunnel, not the API auth middleware
+	//! maybe auth the users into the device to have access to the token
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
