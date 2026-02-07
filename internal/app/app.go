@@ -37,18 +37,23 @@ func (s *APIService) Start() error {
 	return api.Start(s.Config, s.Routes)
 }
 
+// constructor
 func New(cfg *config.Config) *Agent {
+	wifiMgr := loadWifiManager(cfg)
+	return &Agent{
+		Config: cfg,
+		Wifi:   wifiMgr,
+	}
+}
+
+func loadWifiManager(cfg *config.Config) wifi.Provider {
 	var wifiMgr wifi.Provider
 	if cfg.IsArm64() {
 		wifiMgr = &wifi.RealWiFi{Interface: "wlan0"}
 	} else {
 		wifiMgr = &wifi.MockWiFi{}
 	}
-
-	return &Agent{
-		Config: cfg,
-		Wifi:   wifiMgr,
-	}
+	return wifiMgr
 }
 
 func (a *Agent) Bootstrap() {
@@ -58,16 +63,16 @@ func (a *Agent) Bootstrap() {
 	} else {
 		log.Println("[INIT] Internet detected. Skipping setup.")
 	}
+
 	// 2. Initialize Features (Non-blocking setup)
 	cloudFeature := cloud.New(a.Config.DataDir, 8080, a.Config.IsDev)
 	if err := cloudFeature.InitFileSystem(); err != nil {
 		log.Fatalf("[CRITICAL] Failed to initialize cloud fs: %v", err)
 	}
 
-	// --- Monitor Feature ---
 	monitorCfg := monitor.Config{
 		DeviceID:   a.Config.DeviceID,
-		BackendURL: "https://api.strct.org", // Or load from a.Config.BackendURL
+		BackendURL: "https://api.strct.org", // !load from a.Config.BackendURL
 		AuthToken:  a.Config.AuthToken,
 	}
 	monitorFeature := monitor.New(monitorCfg)
@@ -95,15 +100,12 @@ func (a *Agent) Bootstrap() {
 		Routes: routes,
 	}
 
-
-
-a.Services = []Service{
+	a.Services = []Service{
 		tunnel.New(a.Config),    // Frp Tunnel
 		dns.NewAdBlocker(":53"), // AdGuard Home / DNS
 		apiSvc,                  // Unified HTTP Server (Cloud + Monitor)
 	}
 }
-
 
 func (a *Agent) Start() {
 	var wg sync.WaitGroup
@@ -122,7 +124,6 @@ func (a *Agent) Start() {
 
 	wg.Wait()
 }
-
 
 func (a *Agent) hasInternet() bool {
 	client := http.Client{Timeout: 3 * time.Second}

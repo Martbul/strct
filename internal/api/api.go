@@ -45,8 +45,8 @@ func corsMiddleware(next http.Handler) http.Handler {
 		origin := r.Header.Get("Origin")
 
 		allowedOrigins := map[string]bool{
-			"https://portal.strct.org":     true,
-			"https://dev.portal.strct.org": true,
+			"https://strct.org":     true,
+			"https://dev.strct.org": true,
 			"http://localhost:3001":        true,
 			"http://localhost:3000":        true,
 		}

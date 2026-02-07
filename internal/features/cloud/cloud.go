@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/strct-org/strct-agent/internal/humanize"
@@ -51,42 +50,6 @@ func New(dataDir string, port int, isDev bool) *Cloud {
 	}
 }
 
-// func (s *Cloud) Start() error {
-// 	absPath, err := filepath.Abs(s.DataDir)
-// 	if err != nil {
-// 		absPath = filepath.Clean(s.DataDir)
-// 	}
-// 	s.DataDir = absPath
-
-// 	if err := os.MkdirAll(s.DataDir, 0755); err != nil {
-// 		log.Printf("[CLOUD] Error creating root path: %v", err)
-// 		return err
-// 	}
-
-// 	s.StartTime = time.Now()
-
-// 	config := api.Config{
-// 		Port:    s.Port,
-// 		DataDir: s.DataDir,
-// 		IsDev:   s.IsDev,
-// 	}
-
-// 	routes := map[string]http.HandlerFunc{
-// 		"/": func(w http.ResponseWriter, r *http.Request) {
-// 			w.Header().Set("Content-Type", "text/html")
-// 			w.Write([]byte("<h1>Strct Agent is Online</h1><p>API endpoints: /api/status, /api/files</p>"))
-// 		},
-// 		"/api/status":           s.handleStatus,
-// 		"/api/files":            s.handleFiles,
-// 		"/api/mkdir":            s.handleMkdir,
-// 		"/api/delete":           s.handleDelete,
-// 		"/strct_agent/fs/upload": s.handleUpload,
-// 	}
-
-// 	return api.Start(config, routes)
-// }
-
-
 func (s *Cloud) InitFileSystem() error {
 	absPath, err := filepath.Abs(s.DataDir)
 	if err != nil {
@@ -105,22 +68,16 @@ func (s *Cloud) InitFileSystem() error {
 
 func (s *Cloud) GetRoutes() map[string]http.HandlerFunc {
 	return map[string]http.HandlerFunc{
-		"/api/status":           s.handleStatus,
-		"/api/files":            s.handleFiles,
-		"/api/mkdir":            s.handleMkdir,
-		"/api/delete":           s.handleDelete,
+		"/api/status":            s.handleStatus,
+		"/api/files":             s.handleFiles,
+		"/api/mkdir":             s.handleMkdir,
+		"/api/delete":            s.handleDelete,
 		"/strct_agent/fs/upload": s.handleUpload,
 	}
 }
 
-
 func (s *Cloud) handleStatus(w http.ResponseWriter, r *http.Request) {
-	var stat syscall.Statfs_t
-	var realFree uint64
-
-	if err := syscall.Statfs(s.DataDir, &stat); err == nil {
-		realFree = stat.Bavail * uint64(stat.Bsize)
-	}
+	realFree, _ := disk.GetFreeDiskSpace(s.DataDir)
 
 	userUsed, err := disk.GetDirSize(s.DataDir)
 	if err != nil {
