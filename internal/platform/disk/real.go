@@ -90,8 +90,6 @@ func (d *RealDisk) EnsureMounted(mountPoint string) error {
 	return nil
 }
 
-// NVMe drives use "p1" (nvme0n1p1)
-// USB/SATA drives use "1" (sda1)
 func (d *RealDisk) getPartitionPath() string {
 	if strings.Contains(d.DevicePath, "nvme") {
 		return d.DevicePath + "p1"

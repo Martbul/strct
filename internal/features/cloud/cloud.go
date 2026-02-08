@@ -51,6 +51,49 @@ func New(dataDir string, port int, isDev bool) *Cloud {
 }
 
 func (s *Cloud) InitFileSystem() error {
+	candidates := []string{"/dev/nvme0n1", "/dev/sda"}
+	
+	const ssdMountPoint = "/mnt/strct_data"
+	
+	ssdSelected := false
+
+	for _, devicePath := range candidates {
+		if _, err := os.Stat(devicePath); err == nil {
+			
+			d := &disk.RealDisk{DevicePath: devicePath}
+
+			err := d.EnsureMounted(ssdMountPoint)
+			
+			if err == nil {
+				// SUCCESS: SSD is formatted and mounted
+				log.Printf("------------------------------------------------")
+				log.Printf("[STORAGE] PRIORITY SELECT: SSD SELECTED")
+				log.Printf("[STORAGE] Device: %s", devicePath)
+				log.Printf("[STORAGE] Mount:  %s", ssdMountPoint)
+				log.Printf("------------------------------------------------")
+
+				// Update the Cloud struct to use this new path
+				s.DataDir = ssdMountPoint
+				ssdSelected = true
+				break
+			} else {
+				// Device exists but failed to mount (likely unformatted)
+				log.Printf("[STORAGE] Detected %s but could not mount (Unformatted?): %v", devicePath, err)
+			}
+		}
+	}
+
+	// 2. Fallback to SD Card if no SSD was successfully mounted
+	if !ssdSelected {
+		log.Printf("------------------------------------------------")
+		log.Printf("[STORAGE] PRIORITY SELECT: SD CARD / INTERNAL")
+		log.Printf("[STORAGE] Reason: No formatted SSD found or mounted.")
+		log.Printf("[STORAGE] Path:   %s", s.DataDir)
+		log.Printf("------------------------------------------------")
+	}
+
+	// 3. Initialize the directory (Ensure it exists)
+	// This runs on s.DataDir, which is now either the SSD path OR the original SD path
 	absPath, err := filepath.Abs(s.DataDir)
 	if err != nil {
 		absPath = filepath.Clean(s.DataDir)
@@ -58,7 +101,7 @@ func (s *Cloud) InitFileSystem() error {
 	s.DataDir = absPath
 
 	if err := os.MkdirAll(s.DataDir, 0755); err != nil {
-		log.Printf("[CLOUD] Error creating root path: %v", err)
+		log.Printf("[CLOUD] Error creating data directory: %v", err)
 		return err
 	}
 
@@ -75,6 +118,7 @@ func (s *Cloud) GetRoutes() map[string]http.HandlerFunc {
 		"/strct_agent/fs/upload": s.handleUpload,
 	}
 }
+
 
 func (s *Cloud) handleStatus(w http.ResponseWriter, r *http.Request) {
 	realFree, _ := disk.GetFreeDiskSpace(s.DataDir)
