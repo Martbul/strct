@@ -3,15 +3,17 @@ package setup
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/strct-org/strct-agent/internal/platform/wifi"
 	"log"
 	"net/http"
 	"os/exec"
+	"time"
+
+	"github.com/strct-org/strct-agent/internal/platform/wifi"
 )
 
 type Credentials struct {
-	SSID     string `json:"ssid"`
-	Password string `json:"password"`
+    SSID     string `json:"ssid"`     
+    Password string `json:"password"` 
 }
 
 func StartCaptivePortal(wifiMgr wifi.Provider, done chan<- bool, devMode bool) {
@@ -26,21 +28,42 @@ func StartCaptivePortal(wifiMgr wifi.Provider, done chan<- bool, devMode bool) {
 		json.NewEncoder(w).Encode(networks)
 	})
 
-	mux.HandleFunc("/connect", func(w http.ResponseWriter, r *http.Request) {
+mux.HandleFunc("/connect", func(w http.ResponseWriter, r *http.Request) {
 		var creds Credentials
+		// Decode the JSON
 		if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
 			http.Error(w, "Invalid JSON", 400)
 			return
 		}
+		
 		log.Printf("[SETUP] Received credentials for %s", creds.SSID)
 
-		err := wifiMgr.Connect(creds.SSID, creds.Password)
-		if err != nil {
-			http.Error(w, "Failed to connect: "+err.Error(), 500)
-			return
-		}
-		w.Write([]byte("Connected! Rebooting..."))
-		done <- true
+		// 1. Respond to the user IMMEDIATELY.
+		// If we wait for the connection logic, the hotspot will die 
+		// and the user will get a "Network Error" instead of success.
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Credentials received. Device is rebooting into client mode..."))
+
+		// 2. Run the connection logic in the background
+		go func() {
+			// Give the HTTP response 2 seconds to flush to the user's phone
+			time.Sleep(2 * time.Second)
+
+			log.Println("[SETUP] Applying Wi-Fi settings...")
+			
+			// This will now kill the hotspot first (due to the fix in Step 1)
+			err := wifiMgr.Connect(creds.SSID, creds.Password)
+			
+			if err != nil {
+				log.Printf("[SETUP] CRITICAL ERROR: Failed to connect: %v", err)
+				// In a real production app, you might want to restart the Hotspot here
+				// if the connection failed, so the user can try again.
+				return 
+			}
+
+			log.Println("[SETUP] Connected successfully! Setup complete.")
+			done <- true
+		}()
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -84,7 +107,7 @@ const htmlPage = `
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>StructIO Setup</title>
+    <title>Strct Wifi Setup</title>
     <style>
         :root {
             --bg-color: #e3e1db;
@@ -310,7 +333,6 @@ const htmlPage = `
 
              <!-- Success State -->
              <div id="success-card" class="card hidden" style="text-align: center">
-                <div style="font-size: 40px; margin-bottom: 10px;">🎉</div>
                 <h3 style="margin-bottom: 10px;">Connecting...</h3>
                 <p>The device is restarting its network interface.<br>You can close this page.</p>
             </div>

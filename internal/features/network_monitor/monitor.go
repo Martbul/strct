@@ -13,7 +13,6 @@ import (
 	ping "github.com/prometheus-community/pro-bing"
 )
 
-// Config holds the details needed to report back to the VPS
 type Config struct {
 	DeviceID   string
 	BackendURL string
@@ -42,54 +41,14 @@ func New(cfg Config) *NetworkMonitor {
 	}
 }
 
-// background worker
 func (m *NetworkMonitor) Start() error {
 	log.Printf("[MONITOR] Starting Network Health Monitor (Target: %s, Interval: 30s)", m.Target)
 
-	// Run immediately on startup
 	m.runPing()
+	m.runBandwidth()
 
 	latencyTicker := time.NewTicker(30 * time.Second)
-	// bandwidthTicker := time.NewTicker(30 * time.Second)
 	bandwidthTicker := time.NewTicker(2 * time.Hour)
-
-	// defer latencyTicker.Stop()
-	// defer bandwidthTicker.Stop()
-
-	// for {
-	// 	select {
-	// 	case <-latencyTicker.C:
-	// 		stats, err := m.pingTarget()
-	// 		if err != nil {
-	// 			log.Printf("[MONITOR] Ping Execution Failed: %v", err)
-	// 			continue
-	// 		}
-
-	// 		//! send 'stats' to backend.
-	// 		// Because Bandwidth is nil, it won't overwrite DB data with 0.
-	// 		if stats.IsDown != nil && *stats.IsDown {
-	// 			log.Printf("[MONITOR] CRITICAL: Target is DOWN (Loss: %.2f%%)", *stats.Loss)
-	// 		} else if stats.Latency != nil && *stats.Latency > 100.0 {
-	// 			log.Printf("[MONITOR] High Latency: %.2f ms", *stats.Latency)
-	// 		} else {
-	// 			log.Printf("[MONITOR] Health OK: %.2f ms", *stats.Latency)
-	// 		}
-
-	// 	case <-bandwidthTicker.C:
-	// 		stats, err := m.getBandwidth()
-	// 		if err != nil {
-	// 			log.Printf("[MONITOR] Bandwidth Test Failed: %v", err)
-	// 			continue
-	// 		}
-
-	// 		//! send 'stats' to backend.
-	// 		// Latency/Loss are nil, so they won't mess up the DB.
-
-	// 		if stats.Bandwidth != nil {
-	// 			log.Printf("[MONITOR] Bandwidth: %.2f Mbps", *stats.Bandwidth)
-	// 		}
-	// 	}
-	// }
 
 	go func() {
 		for {
@@ -114,14 +73,28 @@ func (m *NetworkMonitor) HandleStats(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(m.stats)
 }
 
+func (m *NetworkMonitor) HandleSpeedtest(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[HandleSpeedtest] Triggered via API")
+
+	go func() {
+		m.runPing()      
+		m.runBandwidth() 
+	}()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "speedtest_initiated"})
+}
+
 func (m *NetworkMonitor) runPing() {
+	log.Printf("[runPing]")
+
 	stats, err := m.pingTarget()
 	if err != nil {
 		log.Printf("[MONITOR] Ping Execution Failed: %v", err)
 		return
 	}
 
-	// 1. Update Local Cache (for local UI)
 	m.mu.Lock()
 	m.stats.Latency = stats.Latency
 	m.stats.Loss = stats.Loss
@@ -129,13 +102,12 @@ func (m *NetworkMonitor) runPing() {
 	m.stats.Timestamp = time.Now()
 	m.mu.Unlock()
 
-	// 2. Send to VPS Backend (Database)
-	// We run this in a goroutine so it doesn't block the next ping
 	go m.reportToBackend(*stats)
 }
 
-
 func (m *NetworkMonitor) runBandwidth() {
+	log.Printf("[runBandwidth]")
+
 	stats, err := m.getBandwidth()
 	if err != nil {
 		log.Printf("[MONITOR] Bandwidth Test Failed: %v", err)
@@ -149,8 +121,6 @@ func (m *NetworkMonitor) runBandwidth() {
 	go m.reportToBackend(*stats)
 }
 
-
-// reportToBackend sends the data to your separate VPS API
 func (m *NetworkMonitor) reportToBackend(stats MonitorStats) {
 	stats.Timestamp = time.Now()
 
@@ -183,7 +153,6 @@ func (m *NetworkMonitor) reportToBackend(stats MonitorStats) {
 		log.Printf("[MONITOR] API Rejected Data: Status %d", resp.StatusCode)
 	}
 }
-
 
 func (m *NetworkMonitor) pingTarget() (*MonitorStats, error) {
 	pinger, err := ping.NewPinger(m.Target)

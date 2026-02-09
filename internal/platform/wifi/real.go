@@ -40,12 +40,31 @@ func (w *RealWiFi) Scan() ([]Network, error) {
 	return networks, nil
 }
 
+// func (w *RealWiFi) Connect(ssid, password string) error {
+// 	fmt.Printf("[WIFI] Connecting to %s...\n", ssid)
+// 	exec.Command("nmcli", "con", "delete", ssid).Run()
+	
+// 	cmd := exec.Command("nmcli", "dev", "wifi", "connect", ssid, "password", password)
+// 	return cmd.Run()
+// }
 func (w *RealWiFi) Connect(ssid, password string) error {
-	fmt.Printf("[WIFI] Connecting to %s...\n", ssid)
+	fmt.Printf("[WIFI] Switching from Hotspot to Client for: %s\n", ssid)
+
+    // 1. AGGRESSIVELY kill the hotspot to free the driver
+	// We ignore errors here because the hotspot might not be running
+	exec.Command("nmcli", "con", "down", "Hotspot").Run()
+	exec.Command("nmcli", "con", "delete", "Hotspot").Run() 
+
+	// 2. Clean up previous connection attempts for this SSID
 	exec.Command("nmcli", "con", "delete", ssid).Run()
 	
+	// 3. Connect to the new network
 	cmd := exec.Command("nmcli", "dev", "wifi", "connect", ssid, "password", password)
-	return cmd.Run()
+	output, err := cmd.CombinedOutput()
+    if err != nil {
+        return fmt.Errorf("connection failed: %s, %v", string(output), err)
+    }
+    return nil
 }
 
 

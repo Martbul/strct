@@ -89,6 +89,7 @@ func (a *Agent) Bootstrap() {
 
 	// Add Monitor Routes
 	routes["/api/network/now"] = monitorFeature.HandleStats
+	routes["/api/network/speedtest"] = monitorFeature.HandleSpeedtest
 
 	// 4. Prepare the API Service Wrapper
 	apiSvc := &APIService{
