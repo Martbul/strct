@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type RealWiFi struct {
@@ -67,12 +68,18 @@ func (w *RealWiFi) Connect(ssid, password string) error {
     return nil
 }
 
-
 func (w *RealWiFi) StartHotspot(ssid, password string) error {
-	fmt.Printf("[WIFI] Configuring Hotspot: %s (Force 2.4GHz)\n", ssid)
+	fmt.Printf("[WIFI] Initializing Hotspot: %s\n", ssid)
 
+	exec.Command("nmcli", "dev", "disconnect", w.Interface).Run()
+	
 	exec.Command("nmcli", "con", "delete", "Hotspot").Run()
 
+	time.Sleep(1 * time.Second) 
+
+
+	fmt.Println("[WIFI] Adding Hotspot connection...")
+	
 	if err := exec.Command("nmcli", "con", "add", "type", "wifi", "ifname", w.Interface, "con-name", "Hotspot", "autoconnect", "yes", "ssid", ssid).Run(); err != nil {
 		return fmt.Errorf("failed to add connection: %v", err)
 	}
@@ -88,16 +95,18 @@ func (w *RealWiFi) StartHotspot(ssid, password string) error {
 		return fmt.Errorf("failed to set AP mode: %v", err)
 	}
 	if err := exec.Command("nmcli", "con", "modify", "Hotspot", "802-11-wireless.band", "bg").Run(); err != nil {
-		return fmt.Errorf("failed to set band to 2.4GHz: %v", err)
+		return fmt.Errorf("failed to set band: %v", err)
 	}
 
 	if err := exec.Command("nmcli", "con", "modify", "Hotspot", "ipv4.method", "shared").Run(); err != nil {
 		return fmt.Errorf("failed to set ipv4 shared: %v", err)
 	}
+    exec.Command("nmcli", "con", "modify", "Hotspot", "ipv4.addresses", "10.42.0.1/24").Run()
 
 	fmt.Println("[WIFI] Bringing up Hotspot...")
-	if output, err := exec.Command("nmcli", "con", "up", "Hotspot").CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to bring up hotspot: %s, %v", string(output), err)
+	output, err := exec.Command("nmcli", "con", "up", "Hotspot").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to bring up hotspot: %s (Err: %v)", string(output), err)
 	}
 
 	return nil

@@ -64,7 +64,6 @@ func (a *Agent) Bootstrap() {
 		log.Println("[INIT] Internet detected. Skipping setup.")
 	}
 
-	// 2. Initialize Features (Non-blocking setup)
 	cloudFeature := cloud.New(a.Config.DataDir, 8080, a.Config.IsDev)
 	if err := cloudFeature.InitFileSystem(); err != nil {
 		log.Fatalf("[CRITICAL] Failed to initialize cloud fs: %v", err)
@@ -76,22 +75,17 @@ func (a *Agent) Bootstrap() {
 		AuthToken:  a.Config.AuthToken,
 	}
 	monitorFeature := monitor.New(monitorCfg)
-	monitorFeature.Start() // Starts background tickers (non-blocking)
+	monitorFeature.Start() 
 
-	// 3. Aggregate Routes
-	// We combine routes from all features into one map for the single HTTP server
 	routes := make(map[string]http.HandlerFunc)
 
-	// Add Cloud Routes
 	for path, handler := range cloudFeature.GetRoutes() {
 		routes[path] = handler
 	}
 
-	// Add Monitor Routes
 	routes["/api/network/now"] = monitorFeature.HandleStats
 	routes["/api/network/speedtest"] = monitorFeature.HandleSpeedtest
 
-	// 4. Prepare the API Service Wrapper
 	apiSvc := &APIService{
 		Config: api.Config{
 			Port:    cloudFeature.Port,
