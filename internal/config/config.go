@@ -11,14 +11,14 @@ import (
 )
 
 type Config struct {
-	DeviceID  string
-	Domain    string
-	VPSIP     string
-	AuthToken string
-	DataDir   string
+	DeviceID   string
+	Domain     string
+	VPSIP      string
+	AuthToken  string
+	DataDir    string
 	BackendURL string
-	VPSPort   int
-	IsDev     bool
+	VPSPort    int
+	IsDev      bool
 }
 
 func Load() *Config {
@@ -47,7 +47,6 @@ func Load() *Config {
 
 	return cfg
 }
-
 
 func (c *Config) IsArm64() bool {
 	return runtime.GOOS == "linux" && runtime.GOARCH == "arm64" && !c.IsDev

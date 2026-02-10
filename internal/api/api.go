@@ -4,11 +4,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+
+	"github.com/strct-org/strct-agent/internal/errs"
 )
 
+const OpStart errs.Op = "api.Start"
+
 type Config struct {
-	Port    int
 	DataDir string
+	Port    int
 	IsDev   bool
 }
 
@@ -33,13 +37,17 @@ func Start(cfg Config, routes map[string]http.HandlerFunc) error {
 		mux.Handle("/files/", fileHandler)
 	}
 
+	addr := fmt.Sprintf(":%d", finalPort)
 	log.Printf("[API] Starting Native Server on port %d serving %s (Dev: %v)", finalPort, cfg.DataDir, cfg.IsDev)
 
 	handlerWithCors := corsMiddleware(mux)
 
-	return http.ListenAndServe(fmt.Sprintf(":%d", finalPort), handlerWithCors)
-}
+	if err := http.ListenAndServe(addr, handlerWithCors); err != nil {
+		return errs.E(OpStart, errs.KindNetwork, err, fmt.Sprintf("server failed on port %d", finalPort))
+	}
 
+	return nil
+}
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")

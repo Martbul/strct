@@ -17,18 +17,18 @@ import (
 )
 
 type Cloud struct {
+	StartTime time.Time
 	DataDir   string
 	Port      int
 	IsDev     bool
-	StartTime time.Time
 }
 
 type StatusResponse struct {
-	IsOnline bool   `json:"isOnline"`
+	Uptime   int64  `json:"uptime"`
+	IP       string `json:"ip"`
 	Used     uint64 `json:"used"`
 	Total    uint64 `json:"total"`
-	IP       string `json:"ip"`
-	Uptime   int64  `json:"uptime"`
+	IsOnline bool   `json:"isOnline"`
 }
 
 type FilesResponse struct {
@@ -52,18 +52,18 @@ func New(dataDir string, port int, isDev bool) *Cloud {
 
 func (s *Cloud) InitFileSystem() error {
 	candidates := []string{"/dev/nvme0n1", "/dev/sda"}
-	
+
 	const ssdMountPoint = "/mnt/strct_data"
-	
+
 	ssdSelected := false
 
 	for _, devicePath := range candidates {
 		if _, err := os.Stat(devicePath); err == nil {
-			
+
 			d := &disk.RealDisk{DevicePath: devicePath}
 
 			err := d.EnsureMounted(ssdMountPoint)
-			
+
 			if err == nil {
 				// SUCCESS: SSD is formatted and mounted
 				log.Printf("------------------------------------------------")
@@ -118,7 +118,6 @@ func (s *Cloud) GetRoutes() map[string]http.HandlerFunc {
 		"/strct_agent/fs/upload": s.handleUpload,
 	}
 }
-
 
 func (s *Cloud) handleStatus(w http.ResponseWriter, r *http.Request) {
 	realFree, _ := disk.GetFreeDiskSpace(s.DataDir)

@@ -12,10 +12,10 @@ import (
 )
 
 type SpyWiFi struct {
-	HotspotStarted bool
-	ConnectCalled  bool
 	SSIDReceived   string
 	PassReceived   string
+	ConnectCalled  bool
+	HotspotStarted bool
 }
 
 func (s *SpyWiFi) Scan() ([]wifi.Network, error) {

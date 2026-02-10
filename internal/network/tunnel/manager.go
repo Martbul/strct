@@ -17,9 +17,9 @@ type Service struct {
 
 type TemplateData struct {
 	ServerIP   string
-	ServerPort int
 	Token      string
 	DeviceID   string
+	ServerPort int
 	LocalPort  int
 }
 

@@ -7,8 +7,8 @@ import (
 
 type Network struct {
 	SSID     string
-	Signal   int
 	Security string
+	Signal   int
 }
 
 type Provider interface {

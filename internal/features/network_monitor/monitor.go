@@ -27,10 +27,10 @@ type NetworkMonitor struct {
 }
 
 type MonitorStats struct {
+	Timestamp time.Time `json:"timestamp"`
 	Latency   *float64  `json:"latency,omitempty"`   // ms
 	Loss      *float64  `json:"loss,omitempty"`      // %
 	Bandwidth *float64  `json:"bandwidth,omitempty"` // Pointer to Mbps
-	Timestamp time.Time `json:"timestamp"`
 	IsDown    *bool     `json:"is_down,omitempty"`
 }
 
@@ -49,7 +49,7 @@ func (m *NetworkMonitor) Start() error {
 	m.runPing()
 	m.runBandwidth()
 
-	latencyTicker := time.NewTicker(30 * time.Second)
+	latencyTicker := time.NewTicker(120 * time.Second)
 	bandwidthTicker := time.NewTicker(2 * time.Hour)
 
 	go func() {
@@ -64,7 +64,6 @@ func (m *NetworkMonitor) Start() error {
 	}()
 
 	return nil
-
 }
 
 func (m *NetworkMonitor) HandleStats(w http.ResponseWriter, r *http.Request) {

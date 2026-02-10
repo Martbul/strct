@@ -16,7 +16,7 @@ import (
 
 type Config struct {
 	CurrentVersion string
-	StorageURL     string // api.strct.org/agent_updates
+	StorageURL     string 
 }
 
 func StartUpdater(cfg Config) {
