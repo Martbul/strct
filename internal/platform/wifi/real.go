@@ -2,6 +2,7 @@ package wifi
 
 import (
 	"fmt"
+	"log"
 	"os/exec"
 	"strings"
 	"time"
@@ -10,7 +11,6 @@ import (
 type RealWiFi struct {
 	Interface string
 }
-
 
 func (w *RealWiFi) Scan() ([]Network, error) {
 	cmd := exec.Command("nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes")
@@ -27,7 +27,7 @@ func (w *RealWiFi) Scan() ([]Network, error) {
 		if len(parts) < 3 {
 			continue
 		}
-		
+
 		if parts[0] == "" {
 			continue
 		}
@@ -44,42 +44,48 @@ func (w *RealWiFi) Scan() ([]Network, error) {
 // func (w *RealWiFi) Connect(ssid, password string) error {
 // 	fmt.Printf("[WIFI] Connecting to %s...\n", ssid)
 // 	exec.Command("nmcli", "con", "delete", ssid).Run()
-	
-// 	cmd := exec.Command("nmcli", "dev", "wifi", "connect", ssid, "password", password)
-// 	return cmd.Run()
-// }
+
+//		cmd := exec.Command("nmcli", "dev", "wifi", "connect", ssid, "password", password)
+//		return cmd.Run()
+//	}
 func (w *RealWiFi) Connect(ssid, password string) error {
 	fmt.Printf("[WIFI] Switching from Hotspot to Client for: %s\n", ssid)
 
-    // 1. AGGRESSIVELY kill the hotspot to free the driver
+	// 1. AGGRESSIVELY kill the hotspot to free the driver
 	// We ignore errors here because the hotspot might not be running
 	exec.Command("nmcli", "con", "down", "Hotspot").Run()
-	exec.Command("nmcli", "con", "delete", "Hotspot").Run() 
+	exec.Command("nmcli", "con", "delete", "Hotspot").Run()
 
 	// 2. Clean up previous connection attempts for this SSID
 	exec.Command("nmcli", "con", "delete", ssid).Run()
-	
+
 	// 3. Connect to the new network
 	cmd := exec.Command("nmcli", "dev", "wifi", "connect", ssid, "password", password)
 	output, err := cmd.CombinedOutput()
-    if err != nil {
-        return fmt.Errorf("connection failed: %s, %v", string(output), err)
-    }
-    return nil
+	if err != nil {
+		return fmt.Errorf("connection failed: %s, %v", string(output), err)
+	}
+	return nil
 }
 
-func (w *RealWiFi) StartHotspot(ssid, password string) error {
-	fmt.Printf("[WIFI] Initializing Hotspot: %s\n", ssid)
+func (w *RealWiFi) StartHotspot() error {
+	macSuffix := "XXXX" //! In prod, get real MAC
+
+	ssid := "Strct-Setup-" + macSuffix
+	password := "strct" + macSuffix
+
+	log.Printf("[WIFI] Creating Hotspot. SSID: %s", ssid)
+
+	log.Printf("[WIFI] Initializing Hotspot: %s\n", ssid)
 
 	exec.Command("nmcli", "dev", "disconnect", w.Interface).Run()
-	
+
 	exec.Command("nmcli", "con", "delete", "Hotspot").Run()
 
-	time.Sleep(1 * time.Second) 
+	time.Sleep(1 * time.Second)
 
+	log.Println("[WIFI] Adding Hotspot connection...")
 
-	fmt.Println("[WIFI] Adding Hotspot connection...")
-	
 	if err := exec.Command("nmcli", "con", "add", "type", "wifi", "ifname", w.Interface, "con-name", "Hotspot", "autoconnect", "yes", "ssid", ssid).Run(); err != nil {
 		return fmt.Errorf("failed to add connection: %v", err)
 	}
@@ -101,7 +107,7 @@ func (w *RealWiFi) StartHotspot(ssid, password string) error {
 	if err := exec.Command("nmcli", "con", "modify", "Hotspot", "ipv4.method", "shared").Run(); err != nil {
 		return fmt.Errorf("failed to set ipv4 shared: %v", err)
 	}
-    exec.Command("nmcli", "con", "modify", "Hotspot", "ipv4.addresses", "10.42.0.1/24").Run()
+	exec.Command("nmcli", "con", "modify", "Hotspot", "ipv4.addresses", "10.42.0.1/24").Run()
 
 	fmt.Println("[WIFI] Bringing up Hotspot...")
 	output, err := exec.Command("nmcli", "con", "up", "Hotspot").CombinedOutput()
@@ -111,8 +117,6 @@ func (w *RealWiFi) StartHotspot(ssid, password string) error {
 
 	return nil
 }
-
-
 
 func (w *RealWiFi) StopHotspot() error {
 	fmt.Println("[WIFI] Stopping Hotspot...")

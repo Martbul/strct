@@ -34,6 +34,8 @@ type MonitorStats struct {
 	IsDown    *bool     `json:"is_down,omitempty"`
 }
 
+
+
 func New(cfg Config) *NetworkMonitor {
 	return &NetworkMonitor{
 		Target: "8.8.8.8",
@@ -138,7 +140,7 @@ func (m *NetworkMonitor) reportToBackend(stats MonitorStats) {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+m.Config.AuthToken) //! the auth token is for the frp tunnel, not the API auth middleware
+	// req.Header.Set("Authorization", "Bearer "+m.Config.AuthToken) //! the auth token is for the frp tunnel, not the API auth middleware
 	//! maybe auth the users into the device to have access to the token
 
 	client := &http.Client{Timeout: 10 * time.Second}

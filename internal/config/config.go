@@ -16,6 +16,7 @@ type Config struct {
 	VPSIP     string
 	AuthToken string
 	DataDir   string
+	BackendURL string
 	VPSPort   int
 	IsDev     bool
 }

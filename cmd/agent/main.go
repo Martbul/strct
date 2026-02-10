@@ -6,16 +6,16 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/strct-org/strct-agent/internal/app"
+	"github.com/strct-org/strct-agent/internal/agent"
 	"github.com/strct-org/strct-agent/internal/config"
 )
 
 func main() {
 	cfg := config.Load()
 	
-	agent := app.New(cfg)
+	agent := agent.New(cfg)
 
-	agent.Bootstrap()
+	agent.Initialize()
 
 	go agent.Start()
 

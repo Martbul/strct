@@ -17,7 +17,9 @@ func (m *MockWiFi) Connect(ssid, password string) error {
 	return nil
 }
 
-func (m *MockWiFi) StartHotspot(ssid, password string) error {
+func (m *MockWiFi) StartHotspot() error {
+	ssid := "mock_hotspot"
+	password := "mock_password"
 	m.IsHotspotRunning = true
 	fmt.Printf("[MOCK] >>> HOTSPOT STARTED <<<\n")
 	fmt.Printf("[MOCK] Name: %s | Pass: %s\n", ssid, password)

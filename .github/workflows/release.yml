@@ -27,7 +27,7 @@ jobs:
           GOARCH: arm64
           LDFLAGS: "-X main.DefaultDomain=strct.org -X main.DefaultVPSIP=157.90.167.157"
         run: |
-          go build -ldflags "$LDFLAGS" -o strct-agent-arm64 cmd/cloud-agent/main.go
+          go build -ldflags "$LDFLAGS" -o strct-agent-arm64 cmd/agent/main.go
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
