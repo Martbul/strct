@@ -11,6 +11,7 @@ import (
 	"time"
 
 	ping "github.com/prometheus-community/pro-bing"
+	"github.com/strct-org/strct-agent/internal/platform/wifi"
 )
 
 type Config struct {
@@ -64,6 +65,27 @@ func (m *NetworkMonitor) Start() error {
 	}()
 
 	return nil
+}
+
+func (m *NetworkMonitor) HandleHealth(w http.ResponseWriter, r *http.Request) {
+	type HealthResponse struct {
+		Status    string `json:"status"`
+		Internet  bool   `json:"internet_access"`
+		Timestamp string `json:"timestamp"`
+	}
+
+	response := HealthResponse{
+		Status:    "ok",
+		Internet:  wifi.HasInternet(),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("[API] Failed to write health response: %v", err)
+	}
 }
 
 func (m *NetworkMonitor) HandleStats(w http.ResponseWriter, r *http.Request) {

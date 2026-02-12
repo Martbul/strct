@@ -25,9 +25,9 @@ const (
 )
 
 type Agent struct {
-	Wifi    wifi.Provider
-	Runners []Runner
-	Config  *config.Config
+	Wifi      wifi.Provider
+	Runners   []Runner
+	Config    *config.Config
 }
 type HTTPFeature interface {
 	GetRoutes() map[string]http.HandlerFunc
@@ -112,8 +112,9 @@ func (a *Agent) setupMonitor() *monitor.NetworkMonitor {
 func (a *Agent) assembleAPIServer(cloud *cloud.Cloud, monitorFeat *monitor.NetworkMonitor) *APIService {
 	routes := cloud.GetRoutes()
 
-	routes["/api/network/now"] = monitorFeat.HandleStats
+	routes["/api/network/stats"] = monitorFeat.HandleStats
 	routes["/api/network/speedtest"] = monitorFeat.HandleSpeedtest
+	routes["/api/health"] = monitorFeat.HandleHealth 
 
 	return &APIService{
 		Config: api.Config{

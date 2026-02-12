@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/strct-org/strct-agent/internal/errs"
 )
@@ -48,28 +49,35 @@ func Start(cfg Config, routes map[string]http.HandlerFunc) error {
 
 	return nil
 }
+
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 
-		allowedOrigins := map[string]bool{
-			"https://strct.org":         true,
-			"https://dev.strct.org":     true,
-			"https://api.strct.org":     true,
-			"https://dev.api.strct.org": true,
-			"http://localhost:3001":     true,
-			"http://localhost:3000":     true,
+		// Define allowed logic
+		allowed := false
+		
+		// 1. Allow Localhost (for dev)
+		if strings.HasPrefix(origin, "http://localhost") {
+			allowed = true
+		}
+		
+		// 2. Allow your production/dev domains (and any subdomains if needed)
+		// This covers dev.strct.org, strct.org, portal.strct.org, etc.
+		if strings.HasSuffix(origin, ".strct.org") || origin == "https://strct.org" {
+			allowed = true
 		}
 
-		if allowedOrigins[origin] {
+		if allowed {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
 
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
-
+		// Handle Preflight (OPTIONS)
 		if r.Method == "OPTIONS" {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Range")
+			w.Header().Set("Access-Control-Max-Age", "3600")
 			w.WriteHeader(http.StatusOK)
 			return
 		}
