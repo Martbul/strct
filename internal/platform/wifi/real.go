@@ -74,45 +74,49 @@ func (w *RealWiFi) StartHotspot() error {
 	ssid := "Strct-Setup-" + macSuffix
 	password := "strct" + macSuffix
 
-	log.Printf("[WIFI] Creating Hotspot. SSID: %s", ssid)
-
-	log.Printf("[WIFI] Initializing Hotspot: %s\n", ssid)
-
-	exec.Command("nmcli", "dev", "disconnect", w.Interface).Run()
+	log.Printf("[WIFI] Creating Hotspot on %s. SSID: %s", w.Interface, ssid)
 
 	exec.Command("nmcli", "con", "delete", "Hotspot").Run()
 
+	exec.Command("nmcli", "radio", "wifi", "on").Run()
 	time.Sleep(1 * time.Second)
 
 	log.Println("[WIFI] Adding Hotspot connection...")
-
-	if err := exec.Command("nmcli", "con", "add", "type", "wifi", "ifname", w.Interface, "con-name", "Hotspot", "autoconnect", "yes", "ssid", ssid).Run(); err != nil {
+// 3. ADD: Create the connection
+	if err := exec.Command("nmcli", "con", "add", 
+		"type", "wifi", 
+		"ifname", w.Interface, 
+		"con-name", "Hotspot", 
+		"autoconnect", "yes", 
+		"ssid", ssid).Run(); err != nil {
 		return fmt.Errorf("failed to add connection: %v", err)
 	}
 
-	if err := exec.Command("nmcli", "con", "modify", "Hotspot", "wifi-sec.key-mgmt", "wpa-psk").Run(); err != nil {
-		return fmt.Errorf("failed to set security type: %v", err)
-	}
-	if err := exec.Command("nmcli", "con", "modify", "Hotspot", "wifi-sec.psk", password).Run(); err != nil {
-		return fmt.Errorf("failed to set password: %v", err)
-	}
-
-	if err := exec.Command("nmcli", "con", "modify", "Hotspot", "802-11-wireless.mode", "ap").Run(); err != nil {
-		return fmt.Errorf("failed to set AP mode: %v", err)
-	}
-	if err := exec.Command("nmcli", "con", "modify", "Hotspot", "802-11-wireless.band", "bg").Run(); err != nil {
-		return fmt.Errorf("failed to set band: %v", err)
+	// 4. CONFIGURE
+	// We batch these for cleaner code, but running them individually is fine too
+	configCmds := [][]string{
+		{"modify", "Hotspot", "wifi-sec.key-mgmt", "wpa-psk"},
+		{"modify", "Hotspot", "wifi-sec.psk", password},
+		{"modify", "Hotspot", "802-11-wireless.mode", "ap"},
+		// {"modify", "Hotspot", "802-11-wireless.band", "bg"}, // <--- REMOVED: Let driver decide
+		{"modify", "Hotspot", "ipv4.method", "shared"},
+		{"modify", "Hotspot", "ipv4.addresses", "10.42.0.1/24"},
 	}
 
-	if err := exec.Command("nmcli", "con", "modify", "Hotspot", "ipv4.method", "shared").Run(); err != nil {
-		return fmt.Errorf("failed to set ipv4 shared: %v", err)
+	for _, args := range configCmds {
+		if err := exec.Command("nmcli", append([]string{"con"}, args...)...).Run(); err != nil {
+			log.Printf("[WIFI] Warning: Failed config step %v: %v", args, err)
+		}
 	}
-	exec.Command("nmcli", "con", "modify", "Hotspot", "ipv4.addresses", "10.42.0.1/24").Run()
 
 	fmt.Println("[WIFI] Bringing up Hotspot...")
+	
+	// 5. UP: This automatically handles the disconnect of client mode
 	output, err := exec.Command("nmcli", "con", "up", "Hotspot").CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to bring up hotspot: %s (Err: %v)", string(output), err)
+		// If it fails, print the detailed status of the device for debugging
+		status, _ := exec.Command("nmcli", "dev", "show", w.Interface).CombinedOutput()
+		return fmt.Errorf("failed to up hotspot: %s\nDEV STATUS:\n%s", string(output), string(status))
 	}
 
 	return nil
