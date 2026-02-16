@@ -24,7 +24,7 @@ type Op string
 type Error struct {
  Op Op // Where did it happen?
  Kind Kind // What category is it?
- Err error // The underlying error (the root cause)
+ Err error // The underlying error 
  Message string // Human-readable message for the user/frontend
 }
 

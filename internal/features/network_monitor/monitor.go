@@ -212,7 +212,7 @@ func (m *NetworkMonitor) getBandwidth() (*MonitorStats, error) {
 	start := time.Now()
 
 	client := http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 50 * time.Second,
 	}
 
 	resp, err := client.Get(testURL)

@@ -77,8 +77,9 @@ func StartCaptivePortal(wifiMgr wifi.Provider, done chan<- bool, devMode bool) {
 
 	log.Printf("[SETUP] Web Server listening on %s", port)
 
+	//! after user connects the device to the wifi remover the dns server
 	if !devMode {
-		dnsServer := StartDNSServer("10.42.0.1")
+		dnsServer := StartDNSServer("10.42.0.1", ":5353")
 		defer dnsServer.Shutdown()
 
 		iface := "wlan0"

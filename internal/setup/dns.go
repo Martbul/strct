@@ -7,7 +7,7 @@ import (
 	"github.com/miekg/dns"
 )
 
-func StartDNSServer(redirectIP string) *dns.Server {
+func StartDNSServer(redirectIP, addr string) *dns.Server {
 	dns.HandleFunc(".", func(w dns.ResponseWriter, r *dns.Msg) {
 		m := new(dns.Msg)
 		m.SetReply(r)
@@ -23,10 +23,10 @@ func StartDNSServer(redirectIP string) *dns.Server {
 		w.WriteMsg(m)
 	})
 
-	server := &dns.Server{Addr: ":5353", Net: "udp"}
-	
+	server := &dns.Server{Addr: addr, Net: "udp"}
+
 	go func() {
-		log.Printf("[DNS] Starting DNS Spoofing Server on :5353 -> %s", redirectIP)
+		log.Printf("[DNS] Starting DNS Spoofing Server on %s -> %s",addr, redirectIP)
 		if err := server.ListenAndServe(); err != nil {
 			log.Printf("[DNS] Failed to start server: %v", err)
 		}

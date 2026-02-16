@@ -12,9 +12,9 @@ import (
 	"github.com/strct-org/strct-agent/internal/api"
 	"github.com/strct-org/strct-agent/internal/config"
 	"github.com/strct-org/strct-agent/internal/errs"
+	adblocker "github.com/strct-org/strct-agent/internal/features/ad_blocker"
 	"github.com/strct-org/strct-agent/internal/features/cloud"
 	monitor "github.com/strct-org/strct-agent/internal/features/network_monitor"
-	"github.com/strct-org/strct-agent/internal/network/dns"
 	"github.com/strct-org/strct-agent/internal/network/tunnel"
 	"github.com/strct-org/strct-agent/internal/platform/wifi"
 	"github.com/strct-org/strct-agent/internal/setup"
@@ -81,19 +81,21 @@ func (a *Agent) Initialize() error {
 		return errs.E(OpAgentInit, err)
 	}
 	monitor := a.setupMonitor()
+	adBlocker := a.setupAdBlocker()
 
-	apiSvc := a.assembleAPIServer(cloud, monitor)
+	apiSvc := a.assembleAPIServer(cloud, monitor, adBlocker)
 	tunnelSvc := tunnel.New(a.Config)
-	dnsSvc := dns.NewAdBlocker(":63")
 	profilerSvc := &ProfilerService{
 		Port: a.Config.PprofPort,
 	}
+
 	a.Runners = []Runner{
 		monitor,
 		tunnelSvc,
-		dnsSvc,
 		apiSvc,
 		profilerSvc,
+		adBlocker,
+
 	}
 
 	return nil
@@ -120,12 +122,19 @@ func (a *Agent) setupMonitor() *monitor.NetworkMonitor {
 	})
 }
 
-func (a *Agent) assembleAPIServer(cloud *cloud.Cloud, monitorFeat *monitor.NetworkMonitor) *APIService {
+
+func (a *Agent) setupAdBlocker() *adblocker.AdBlocker {
+	return adblocker.New(adblocker.AdBlockConfig{})
+}
+
+func (a *Agent) assembleAPIServer(cloud *cloud.Cloud, monitor *monitor.NetworkMonitor, adBlocker *adblocker.AdBlocker) *APIService {
 	routes := cloud.GetRoutes()
 
-	routes["/api/network/stats"] = monitorFeat.HandleStats
-	routes["/api/network/speedtest"] = monitorFeat.HandleSpeedtest
-	routes["/api/health"] = monitorFeat.HandleHealth
+	routes["/api/health"] = monitor.HandleHealth //! remove from the monitor
+	routes["/api/network/stats"] = monitor.HandleStats
+	routes["/api/network/speedtest"] = monitor.HandleSpeedtest
+	routes["/api/adblock/stats"] = adBlocker.HandleStats
+	routes["/api/adblock/toggle"] = adBlocker.HandleToggle
 
 	return &APIService{
 		Config: api.Config{
