@@ -13,7 +13,7 @@ import (
 type Config struct {
 	DeviceID   string
 	Domain     string
-	VPSIP      string
+	VPSIP      string 
 	AuthToken  string
 	DataDir    string
 	BackendURL string

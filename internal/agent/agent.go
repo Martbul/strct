@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 	adblocker "github.com/strct-org/strct-agent/internal/features/ad_blocker"
 	"github.com/strct-org/strct-agent/internal/features/cloud"
 	monitor "github.com/strct-org/strct-agent/internal/features/network_monitor"
+	"github.com/strct-org/strct-agent/internal/features/router"
+	"github.com/strct-org/strct-agent/internal/features/vpn"
 	"github.com/strct-org/strct-agent/internal/network/tunnel"
 	"github.com/strct-org/strct-agent/internal/platform/wifi"
 	"github.com/strct-org/strct-agent/internal/setup"
@@ -82,8 +85,10 @@ func (a *Agent) Initialize() error {
 	}
 	monitor := a.setupMonitor()
 	adBlocker := a.setupAdBlocker()
+	routerController := a.setupRouterController()
+	vpn := a.setupRouterVPN()
 
-	apiSvc := a.assembleAPIServer(cloud, monitor, adBlocker)
+	apiSvc := a.assembleAPIServer(cloud, monitor, adBlocker, routerController, vpn)
 	tunnelSvc := tunnel.New(a.Config)
 	profilerSvc := &ProfilerService{
 		Port: a.Config.PprofPort,
@@ -95,7 +100,8 @@ func (a *Agent) Initialize() error {
 		apiSvc,
 		profilerSvc,
 		adBlocker,
-
+		routerController,
+		vpn,
 	}
 
 	return nil
@@ -122,19 +128,49 @@ func (a *Agent) setupMonitor() *monitor.NetworkMonitor {
 	})
 }
 
-
 func (a *Agent) setupAdBlocker() *adblocker.AdBlocker {
 	return adblocker.New(adblocker.AdBlockConfig{})
 }
 
-func (a *Agent) assembleAPIServer(cloud *cloud.Cloud, monitor *monitor.NetworkMonitor, adBlocker *adblocker.AdBlocker) *APIService {
+func (a *Agent) setupRouterController() *router.RouterController {
+	backend := a.Config.BackendURL //! setup the Backend URL in env
+	if backend == "" {
+		backend = "https://dev.api.strct.org" //! using curently only dev mode
+	}
+	return router.New(router.Config{
+		DeviceID:   a.Config.DeviceID,
+		BackendURL: backend,
+	})
+}
+
+func (a *Agent) setupRouterVPN() *vpn.VPN {
+	return vpn.New(vpn.Config{DeviceID: a.Config.DeviceID})
+}
+
+func (a *Agent) assembleAPIServer(cloud *cloud.Cloud, monitor *monitor.NetworkMonitor, adBlocker *adblocker.AdBlocker, router *router.RouterController, vpn *vpn.VPN) *APIService {
 	routes := cloud.GetRoutes()
 
-	routes["/api/health"] = monitor.HandleHealth //! remove from the monitor
+	routes["/api/health"] = handleHealth
 	routes["/api/network/stats"] = monitor.HandleStats
 	routes["/api/network/speedtest"] = monitor.HandleSpeedtest
+
 	routes["/api/adblock/stats"] = adBlocker.HandleStats
 	routes["/api/adblock/toggle"] = adBlocker.HandleToggle
+
+	routes["/api/router/devices"] = router.HandleGetDevices
+	routes["/api/router/block"] = router.HandleBlockDevice
+
+	routes["/api/router/config"] = func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			router.HandleSetConfig(w, r)
+		} else {
+			router.HandleGetConfig(w, r)
+		}
+	}
+
+	routes["/api/vpn/status"] = vpn.HandleGetStatus
+	routes["/api/vpn/setup"] = vpn.HandleSetup
+	routes["/api/vpn/toggle"] = vpn.HandleToggleExitNode
 
 	return &APIService{
 		Config: api.Config{
@@ -199,4 +235,25 @@ func (p *ProfilerService) Start() error {
 	log.Printf("[PPROF] Profiling server started on http://%s/debug/pprof", addr)
 
 	return http.ListenAndServe(addr, nil)
+}
+
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+	type HealthResponse struct {
+		Status    string `json:"status"`
+		Internet  bool   `json:"internet_access"`
+		Timestamp string `json:"timestamp"`
+	}
+
+	response := HealthResponse{
+		Status:    "ok",
+		Internet:  wifi.HasInternet(),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("[API] Failed to write health response: %v", err)
+	}
 }
