@@ -144,7 +144,7 @@ func (a *Agent) setupRouterController() *router.RouterController {
 }
 
 func (a *Agent) setupRouterVPN() *vpn.VPN {
-	return vpn.New(vpn.Config{DeviceID: a.Config.DeviceID})
+	return vpn.New(vpn.Config{DeviceID: a.Config.DeviceID, AuthKey: a.Config.TailScaleAuthToken})
 }
 
 func (a *Agent) assembleAPIServer(cloud *cloud.Cloud, monitor *monitor.NetworkMonitor, adBlocker *adblocker.AdBlocker, router *router.RouterController, vpn *vpn.VPN) *APIService {
@@ -169,7 +169,7 @@ func (a *Agent) assembleAPIServer(cloud *cloud.Cloud, monitor *monitor.NetworkMo
 	}
 
 	routes["/api/vpn/status"] = vpn.HandleGetStatus
-	routes["/api/vpn/setup"] = vpn.HandleSetup
+	// routes["/api/vpn/setup"] = vpn.HandleSetup
 	routes["/api/vpn/toggle"] = vpn.HandleToggleExitNode
 
 	return &APIService{

@@ -11,17 +11,18 @@ import (
 )
 
 type Config struct {
-	DeviceID   string
-	Domain     string
-	VPSIP      string 
-	AuthToken  string
-	DataDir    string
-	BackendURL string
-	VPSPort    int
-	PprofPort  int
-	IsDev      bool
+	DeviceID           string
+	Domain             string
+	VPSIP              string
+	AuthToken          string
+	DataDir            string
+	BackendURL         string
+	TailScaleClientId  string
+	TailScaleAuthToken string
+	VPSPort            int
+	PprofPort          int
+	IsDev              bool
 }
-
 
 func Load() *Config {
 	devMode := flag.Bool("dev", false, "Run in development mode (Mock hardware)")
@@ -32,12 +33,14 @@ func Load() *Config {
 	}
 
 	cfg := &Config{
-		IsDev:     *devMode,
-		VPSIP:     getEnv("VPS_IP", "127.0.0.1"),
-		VPSPort:   getEnvAsInt("VPS_PORT", 7000),
-		AuthToken: getEnv("AUTH_TOKEN", "default-secret"),
-		Domain:    getEnv("DOMAIN", "localhost"),
-		PprofPort: getEnvAsInt("PPROF_PORT", 6060),
+		IsDev:              *devMode,
+		VPSIP:              getEnv("VPS_IP", "127.0.0.1"),
+		VPSPort:            getEnvAsInt("VPS_PORT", 7000),
+		AuthToken:          getEnv("AUTH_TOKEN", "default-secret"),
+		Domain:             getEnv("DOMAIN", "localhost"),
+		PprofPort:          getEnvAsInt("PPROF_PORT", 6060),
+		TailScaleClientId:  getEnv("TAILSCALE_CLIENT_ID", "no_ts_client_id"),
+		TailScaleAuthToken: getEnv("TAILSCALE_AUTH_TOKEN", "no_auth_token"),
 	}
 
 	if cfg.IsArm64() {
@@ -50,7 +53,6 @@ func Load() *Config {
 
 	return cfg
 }
-
 
 func (c *Config) IsArm64() bool {
 	return runtime.GOOS == "linux" && runtime.GOARCH == "arm64" && !c.IsDev
