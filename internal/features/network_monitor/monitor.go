@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,17 +12,17 @@ import (
 	"time"
 
 	ping "github.com/prometheus-community/pro-bing"
-	"golang.org/x/net/context"
+	"github.com/strct-org/strct-agent/internal/config"
 )
 
-type Config struct {
+type MonitorConfig struct {
 	DeviceID   string
 	BackendURL string
 	AuthToken  string
 }
 
 type NetworkMonitor struct {
-	Config Config
+	Config MonitorConfig
 	stats  MonitorStats
 	mu     sync.RWMutex
 	Target string
@@ -35,16 +36,31 @@ type MonitorStats struct {
 	IsDown    *bool     `json:"is_down,omitempty"`
 }
 
-
-
-func New(cfg Config) *NetworkMonitor {
+func New(cfg MonitorConfig) *NetworkMonitor {
 	return &NetworkMonitor{
 		Target: "8.8.8.8",
 		Config: cfg,
 	}
 }
 
-//! implement canceling loginc with ctx context.Context
+func NewFromConfig(cfg *config.Config) *NetworkMonitor {
+	backend := cfg.BackendURL
+	if backend == "" {
+		backend = "https://dev.api.strct.org"
+	}
+	return New(MonitorConfig{
+		DeviceID:   cfg.DeviceID,
+		BackendURL: backend,
+		AuthToken:  cfg.AuthToken,
+	})
+}
+
+func (m *NetworkMonitor) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/api/network/stats", m.HandleStats)
+	mux.HandleFunc("/api/network/speedtest", m.HandleSpeedtest)
+}
+
+// ! implement canceling loginc with ctx context.Context
 func (m *NetworkMonitor) Start(ctx context.Context) error {
 	log.Printf("[MONITOR] Starting Network Health Monitor (Target: %s, Interval: 30s)", m.Target)
 
@@ -68,8 +84,6 @@ func (m *NetworkMonitor) Start(ctx context.Context) error {
 	return nil
 }
 
-
-
 func (m *NetworkMonitor) HandleStats(w http.ResponseWriter, r *http.Request) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -82,8 +96,8 @@ func (m *NetworkMonitor) HandleSpeedtest(w http.ResponseWriter, r *http.Request)
 	log.Printf("[HandleSpeedtest] Triggered via API")
 
 	go func() {
-		m.runPing()      
-		m.runBandwidth() 
+		m.runPing()
+		m.runBandwidth()
 	}()
 
 	w.Header().Set("Content-Type", "application/json")

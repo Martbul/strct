@@ -11,23 +11,37 @@ import (
 	"github.com/strct-org/strct-agent/internal/config"
 )
 
+// func main() {
+// 	cfg := config.Load()
+
+// 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+// 	defer stop()
+
+// 	agent := agent.New(cfg)
+// 	agent.Initialize()
+
+// 	go agent.Start(ctx)
+
+// 	waitForShutdown()
+// }
+
+// func waitForShutdown() {
+// 	sigChan := make(chan os.Signal, 1)
+// 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+// 	<-sigChan
+// 	log.Println("Shutting down gracefully...")
+// }
 func main() {
-	cfg := config.Load()
+    cfg := config.Load()
 
-	agent := agent.New(cfg)
+    agent, err := agent.InitializeAgent(cfg)
+    if err != nil {
+        log.Fatalf("Failed to initialize: %v", err)
+    }
 
-	agent.Initialize()
+    ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+    defer stop()
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-	go agent.Start(ctx)
-
-	waitForShutdown()
-}
-
-func waitForShutdown() {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
-	log.Println("Shutting down gracefully...")
+    agent.Start(ctx)
+    log.Println("Shutdown complete.")
 }

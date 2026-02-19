@@ -16,10 +16,9 @@ import (
 	"github.com/miekg/dns"
 )
 
-
 const (
 	upstreamDNS = "1.1.1.1:53"
-	addrDNS     = ":5354" 
+	addrDNS     = ":5354"
 	maxLogSize  = 50
 )
 
@@ -32,10 +31,10 @@ type AdBlocker struct {
 	blockedQueries int64
 	logs           []BlockLog
 	trafficMap     map[string]*TrafficPoint
-	dnsServer      *dns.Server 
+	dnsServer      *dns.Server
 }
 
-type AdBlockConfig struct {}
+type AdBlockConfig struct{}
 
 type AdBlockStats struct {
 	TotalQueries   int64          `json:"total_queries"`
@@ -58,8 +57,6 @@ type BlockLog struct {
 	Timestamp int64  `json:"-"`
 }
 
-
-
 func New(cfg AdBlockConfig) *AdBlocker {
 	return &AdBlocker{
 		Config:     cfg,
@@ -70,8 +67,17 @@ func New(cfg AdBlockConfig) *AdBlocker {
 	}
 }
 
+func NewDefault() *AdBlocker {
+    return New(AdBlockConfig{})
+}
 
-//! implement canceling loginc with ctx context.Context
+// every feature initiaalizs its own routes
+func (a *AdBlocker) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/api/adblock/stats", a.HandleStats)
+	mux.HandleFunc("/api/adblock/toggle", a.HandleToggle)
+}
+
+// ! implement canceling loginc with ctx context.Context
 func (a *AdBlocker) Start(ctx context.Context) error {
 	log.Println("[AD_BLOCKER] Starting Ad Blocker Service")
 
@@ -112,14 +118,13 @@ func (a *AdBlocker) Start(ctx context.Context) error {
 	return nil
 }
 
-
 func (a *AdBlocker) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	m := new(dns.Msg)
 	m.SetReply(r)
 	m.Compress = false
 
 	a.mu.Lock()
-	
+
 	// If disabled, just forward immediately
 	if !a.enabled {
 		a.mu.Unlock()
@@ -146,8 +151,8 @@ func (a *AdBlocker) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 			// Add to logs
 			a.logs = append([]BlockLog{{
-				Domain: domain,
-				Time:   time.Now().Format("15:04:05"),
+				Domain:    domain,
+				Time:      time.Now().Format("15:04:05"),
 				Timestamp: time.Now().Unix(),
 			}}, a.logs...)
 
@@ -235,17 +240,18 @@ func (a *AdBlocker) updateBlocklist() {
 	count := 0
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "#") || line == "" { continue }
+		if strings.HasPrefix(line, "#") || line == "" {
+			continue
+		}
 		fields := strings.Fields(line)
 		if len(fields) >= 2 {
 			newList[fields[1]] = true
 			count++
 		}
 	}
-	
+
 	a.mu.Lock()
 	a.blocklist = newList
 	a.mu.Unlock()
 	log.Printf("[AD_BLOCKER] Loaded %d domains.", count)
 }
-

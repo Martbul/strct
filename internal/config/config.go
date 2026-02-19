@@ -78,3 +78,17 @@ func getEnvAsInt(key string, fallback int) int {
 	}
 	return val
 }
+
+type BackendURL string
+type DataDir string
+
+func ProvideBackendURL(cfg *Config) BackendURL {
+	if cfg.BackendURL != "" {
+		return BackendURL(cfg.BackendURL)
+	}
+	return "https://dev.api.strct.org"
+}
+
+func ProvideDataDir(cfg *Config) DataDir {
+	return DataDir(cfg.DataDir)
+}

@@ -14,6 +14,7 @@ require (
 
 require (
 	aead.dev/minisign v0.2.0 // indirect
+	github.com/google/wire v0.7.0 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	golang.org/x/crypto v0.47.0 // indirect
 	golang.org/x/mod v0.31.0 // indirect

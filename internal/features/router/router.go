@@ -14,8 +14,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-)
 
+	"github.com/strct-org/strct-agent/internal/config"
+)
 
 type Config struct {
 	DeviceID   string
@@ -52,7 +53,6 @@ type ConnectedDevice struct {
 	Limited bool   `json:"limited"` // Bandwidth limited
 }
 
-
 type RouterController struct {
 	Config      Config
 	State       RouterConfig
@@ -60,7 +60,6 @@ type RouterController struct {
 	mu          sync.RWMutex
 	blockedMACs map[string]bool
 }
-
 
 func New(cfg Config) *RouterController {
 	initialState := RouterConfig{
@@ -81,9 +80,29 @@ func New(cfg Config) *RouterController {
 		blockedMACs: make(map[string]bool),
 	}
 }
+func NewFromConfig(cfg *config.Config) *RouterController {
+    backend := cfg.BackendURL
+    if backend == "" {
+        backend = "https://dev.api.strct.org"
+    }
+    return New(Config{
+        DeviceID:   cfg.DeviceID,
+        BackendURL: backend,
+    })
+}
+func (rc *RouterController) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/api/router/devices", rc.HandleGetDevices)
+	mux.HandleFunc("/api/router/block", rc.HandleBlockDevice)
+	mux.HandleFunc("/api/router/config", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			rc.HandleSetConfig(w, r)
+		} else {
+			rc.HandleGetConfig(w, r)
+		}
+	})
+}
 
-
-//! implement canceling loginc with ctx context.Context
+// ! implement canceling loginc with ctx context.Context
 func (r *RouterController) Start(ctx context.Context) error {
 	log.Printf("[ROUTER] Starting Router Control Service")
 
@@ -102,7 +121,6 @@ func (r *RouterController) Start(ctx context.Context) error {
 
 	return nil
 }
-
 
 func (rc *RouterController) HandleGetConfig(w http.ResponseWriter, req *http.Request) {
 	rc.mu.RLock()
@@ -142,8 +160,8 @@ func (rc *RouterController) HandleGetDevices(w http.ResponseWriter, req *http.Re
 // HandleBlockDevice toggles internet access for a specific MAC
 func (rc *RouterController) HandleBlockDevice(w http.ResponseWriter, req *http.Request) {
 	type BlockRequest struct {
-		MAC     string `json:"mac"`
-		Block   bool   `json:"block"`
+		MAC   string `json:"mac"`
+		Block bool   `json:"block"`
 	}
 
 	var payload BlockRequest
@@ -172,7 +190,6 @@ func (rc *RouterController) HandleBlockDevice(w http.ResponseWriter, req *http.R
 	w.WriteHeader(http.StatusOK)
 }
 
-
 func (rc *RouterController) applySystemConfig() {
 	rc.mu.RLock()
 	cfg := rc.State
@@ -189,7 +206,7 @@ func (rc *RouterController) applySystemConfig() {
 	default:
 		nameserver = "1.1.1.1"
 	}
-	
+
 	// Write /etc/resolv.conf
 	dnsContent := fmt.Sprintf("nameserver %s\n", nameserver)
 	os.WriteFile("/etc/resolv.conf", []byte(dnsContent), 0644)
@@ -199,8 +216,8 @@ func (rc *RouterController) applySystemConfig() {
 	exec.Command("iwconfig", "wlan0", "txpower", cfg.TxPower).Run()
 
 	// 3. Port Forwarding (Clean up old rules first - simplified)
-	exec.Command("iptables", "-t", "nat", "-F", "PREROUTING").Run() 
-	
+	exec.Command("iptables", "-t", "nat", "-F", "PREROUTING").Run()
+
 	for _, rule := range cfg.PortRules {
 		// iptables -t nat -A PREROUTING -p tcp --dport 80 -j DNAT --to-destination 192.168.1.50:80
 		protocol := strings.ToLower(rule.Protocol)
@@ -217,7 +234,7 @@ func (rc *RouterController) applySystemConfig() {
 	// For this example, we log it, as restarting hostapd drops the connection
 	// which stops the response from reaching the client.
 	log.Printf("[ROUTER] Config Update: SSID=%s Hidden=%v", cfg.SSID, cfg.IsHidden)
-	
+
 	// Example of how you would restart hostapd:
 	// exec.Command("systemctl", "restart", "hostapd").Run()
 }
@@ -242,7 +259,7 @@ func (rc *RouterController) scanDevices() {
 	// Example: ? (192.168.1.15) at a1:b2:c3:d4:e5:f6 [ether] on wlan0
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	var detected []ConnectedDevice
-	
+
 	// Regex to extract IP and MAC
 	re := regexp.MustCompile(`\((.*?)\) at ([0-9a-f:]{17})`)
 
@@ -256,7 +273,7 @@ func (rc *RouterController) scanDevices() {
 		if len(matches) == 3 {
 			ip := matches[1]
 			mac := matches[2]
-			
+
 			// Filter out incomplete entries
 			if mac == "<incomplete>" {
 				continue
@@ -288,13 +305,13 @@ func (rc *RouterController) scanDevices() {
 func (rc *RouterController) reportDevicesToBackend(devices []ConnectedDevice) {
 	// Logic similar to monitor.reportToBackend
 	// POST /api/v1/device/agent/{id}/connected_devices
-	
+
 	url := fmt.Sprintf("%s/api/v1/device/agent/%s/connected_devices", rc.Config.BackendURL, rc.Config.DeviceID)
 	payload, _ := json.Marshal(devices)
 
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(payload))
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	client := &http.Client{Timeout: 5 * time.Second}
 	client.Do(req)
 }

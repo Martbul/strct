@@ -33,16 +33,16 @@ const (
 )
 
 type Agent struct {
-	Wifi    wifi.Provider
-	Runners []Runner
-	Config  *config.Config
+	Wifi     wifi.Provider
+	Services []Service
+	Config   *config.Config
 }
 
 type HTTPFeature interface {
 	GetRoutes() map[string]http.HandlerFunc
 }
 
-type Runner interface {
+type Service interface {
 	Start(ctx context.Context) error
 	//  Stop()
 }
@@ -60,11 +60,18 @@ func (s *APIService) Start(ctx context.Context) error {
 	return api.Start(ctx, s.Config, s.Routes)
 }
 
-func New(cfg *config.Config) *Agent {
-	return &Agent{
-		Config: cfg,
-		Wifi:   loadWifiManager(cfg),
+// New accepts all dependencies — Wire calls this.
+func New(
+	cfg *config.Config,
+	w wifi.Provider,
+	services []Service, // Wire uses wire.Value or a struct for this — see note
+) (*Agent, error) {
+	a := &Agent{Config: cfg, Wifi: w, Services: services}
+
+	if err := a.ensureConnectivity(); err != nil {
+		return nil, errs.E("agent.New", err)
 	}
+	return a, nil
 }
 
 func loadWifiManager(cfg *config.Config) wifi.Provider {
@@ -97,7 +104,7 @@ func (a *Agent) Initialize() error {
 		Port: a.Config.PprofPort,
 	}
 
-	a.Runners = []Runner{
+	a.Services = []Service{
 		monitor,
 		tunnelSvc,
 		apiSvc,
@@ -124,7 +131,7 @@ func (a *Agent) setupMonitor() *monitor.NetworkMonitor {
 		backend = "https://dev.api.strct.org" //! using curently only dev mode
 	}
 
-	return monitor.New(monitor.Config{
+	return monitor.New(monitor.MonitorConfig{
 		DeviceID:   a.Config.DeviceID,
 		BackendURL: backend,
 		AuthToken:  a.Config.AuthToken,
@@ -150,40 +157,40 @@ func (a *Agent) setupRouterVPN() *vpn.VPN {
 	return vpn.New(vpn.Config{DeviceID: a.Config.DeviceID, AuthKey: a.Config.TailScaleAuthToken})
 }
 
-func (a *Agent) assembleAPIServer(cloud *cloud.Cloud, monitor *monitor.NetworkMonitor, adBlocker *adblocker.AdBlocker, router *router.RouterController, vpn *vpn.VPN) *APIService {
-	routes := cloud.GetRoutes()
+// func (a *Agent) assembleAPIServer(cloud *cloud.Cloud, monitor *monitor.NetworkMonitor, adBlocker *adblocker.AdBlocker, router *router.RouterController, vpn *vpn.VPN) *APIService {
+// 	routes := cloud.GetRoutes()
 
-	routes["/api/health"] = handleHealth
-	routes["/api/network/stats"] = monitor.HandleStats
-	routes["/api/network/speedtest"] = monitor.HandleSpeedtest
+// 	routes["/api/health"] = handleHealth
+// 	routes["/api/network/stats"] = monitor.HandleStats
+// 	routes["/api/network/speedtest"] = monitor.HandleSpeedtest
 
-	routes["/api/adblock/stats"] = adBlocker.HandleStats
-	routes["/api/adblock/toggle"] = adBlocker.HandleToggle
+// 	routes["/api/adblock/stats"] = adBlocker.HandleStats
+// 	routes["/api/adblock/toggle"] = adBlocker.HandleToggle
 
-	routes["/api/router/devices"] = router.HandleGetDevices
-	routes["/api/router/block"] = router.HandleBlockDevice
+// 	routes["/api/router/devices"] = router.HandleGetDevices
+// 	routes["/api/router/block"] = router.HandleBlockDevice
 
-	routes["/api/router/config"] = func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			router.HandleSetConfig(w, r)
-		} else {
-			router.HandleGetConfig(w, r)
-		}
-	}
+// 	routes["/api/router/config"] = func(w http.ResponseWriter, r *http.Request) {
+// 		if r.Method == http.MethodPost {
+// 			router.HandleSetConfig(w, r)
+// 		} else {
+// 			router.HandleGetConfig(w, r)
+// 		}
+// 	}
 
-	routes["/api/vpn/status"] = vpn.HandleGetStatus
-	// routes["/api/vpn/setup"] = vpn.HandleSetup
-	routes["/api/vpn/toggle"] = vpn.HandleToggleExitNode
+// 	routes["/api/vpn/status"] = vpn.HandleGetStatus
+// 	// routes["/api/vpn/setup"] = vpn.HandleSetup
+// 	routes["/api/vpn/toggle"] = vpn.HandleToggleExitNode
 
-	return &APIService{
-		Config: api.Config{
-			Port:    cloud.Port,
-			DataDir: cloud.DataDir,
-			IsDev:   cloud.IsDev,
-		},
-		Routes: routes,
-	}
-}
+// 	return &APIService{
+// 		Config: api.Config{
+// 			Port:    cloud.Port,
+// 			DataDir: cloud.DataDir,
+// 			IsDev:   cloud.IsDev,
+// 		},
+// 		Routes: routes,
+// 	}
+// }
 
 func (a *Agent) ensureConnectivity() error {
 	if wifi.HasInternet() {
@@ -201,19 +208,18 @@ func (a *Agent) ensureConnectivity() error {
 }
 
 func (a *Agent) Start(ctx context.Context) {
-	var wg sync.WaitGroup
-	log.Println("--- Strct Agent Starting ---")
-
-	for _, runner := range a.Runners {
-		wg.Add(1)
-		go func(r Runner) {
-			defer wg.Done()
-			if err := r.Start(ctx); err != nil {
-				log.Printf("[CRITICAL] Component crashed: %v", err)
-			}
-		}(runner)
-	}
-	wg.Wait()
+    var wg sync.WaitGroup
+    log.Println("--- Strct Agent Starting ---")
+    for _, svc := range a.Services {
+        wg.Add(1)
+        go func(s Service) {
+            defer wg.Done()
+            if err := s.Start(ctx); err != nil {
+                log.Printf("[CRITICAL] Service crashed: %v", err)
+            }
+        }(svc)
+    }
+    wg.Wait()
 }
 
 func (a *Agent) runSetupWizard() {

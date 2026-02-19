@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/strct-org/strct-agent/internal/disk"
 	"github.com/strct-org/strct-agent/internal/humanize"
 	"github.com/strct-org/strct-agent/internal/netx"
-	"github.com/strct-org/strct-agent/internal/disk"
 )
 
 type Cloud struct {
@@ -48,6 +48,15 @@ func New(dataDir string, port int, isDev bool) *Cloud {
 		Port:    port,
 		IsDev:   isDev,
 	}
+}
+
+func (s *Cloud) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/api/files", s.handleFiles)
+	mux.HandleFunc("/api/mkdir", s.handleMkdir)
+	mux.HandleFunc("/api/delete", s.handleDelete)
+	mux.HandleFunc("/strct_agent/fs/upload", s.handleUpload)
+	mux.Handle("/files/", http.StripPrefix("/files/", http.FileServer(http.Dir(s.DataDir))))
 }
 
 func (s *Cloud) InitFileSystem() error {

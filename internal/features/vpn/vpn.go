@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/strct-org/strct-agent/internal/config"
 )
 
 type Config struct {
@@ -39,6 +41,19 @@ func New(cfg Config) *VPN {
 		State:  VPNState{},
 	}
 }
+func NewFromConfig(cfg *config.Config) *VPN {
+    return New(Config{
+        DeviceID: cfg.DeviceID,
+        AuthKey:  cfg.TailScaleAuthToken,
+    })
+}
+
+func (v *VPN) RegisterRoutes(mux *http.ServeMux) {
+    mux.HandleFunc("/api/vpn/status", v.HandleGetStatus)
+    mux.HandleFunc("/api/vpn/toggle", v.HandleToggleExitNode)
+}
+
+
 
 //! implement canceling loginc with ctx context.Context
 func (v *VPN) Start(ctx context.Context) error {
