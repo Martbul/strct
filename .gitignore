@@ -16,3 +16,6 @@ device-id.lock
 *.tar.gz
 *.img
 agent
+
+
+bin/
