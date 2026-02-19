@@ -81,25 +81,20 @@ func New(cfg Config) *RouterController {
 	}
 }
 func NewFromConfig(cfg *config.Config) *RouterController {
-    backend := cfg.BackendURL
-    if backend == "" {
-        backend = "https://dev.api.strct.org"
-    }
-    return New(Config{
-        DeviceID:   cfg.DeviceID,
-        BackendURL: backend,
-    })
+	backend := cfg.BackendURL
+	if backend == "" {
+		backend = "https://dev.api.strct.org"
+	}
+	return New(Config{
+		DeviceID:   cfg.DeviceID,
+		BackendURL: backend,
+	})
 }
 func (rc *RouterController) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/router/devices", rc.HandleGetDevices)
 	mux.HandleFunc("/api/router/block", rc.HandleBlockDevice)
-	mux.HandleFunc("/api/router/config", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			rc.HandleSetConfig(w, r)
-		} else {
-			rc.HandleGetConfig(w, r)
-		}
-	})
+	mux.HandleFunc("GET /api/router/config", rc.HandleGetConfig)
+	mux.HandleFunc("POST /api/router/config", rc.HandleSetConfig)
 }
 
 // ! implement canceling loginc with ctx context.Context

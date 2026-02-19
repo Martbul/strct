@@ -43,8 +43,7 @@ func New(cfg *config.Config) *Service {
 	}
 }
 
-
-//! implement canceling loginc with ctx context.Context
+// ! implement canceling loginc with ctx context.Context
 func (s *Service) Start(ctx context.Context) error {
 	// 1. GET PROJECT ROOT (Current Working Directory)
 	projectRoot, err := os.Getwd()
@@ -75,7 +74,7 @@ func (s *Service) Start(ctx context.Context) error {
 		ServerPort: s.GlobalConfig.VPSPort,
 		Token:      s.GlobalConfig.AuthToken,
 		DeviceID:   s.GlobalConfig.DeviceID,
-		LocalPort:  8080, 
+		LocalPort:  8080,
 	}
 
 	log.Printf("[TUNNEL] Configuring for Device: %s -> %s:%d", data.DeviceID, data.ServerIP, data.ServerPort)
@@ -90,7 +89,7 @@ func (s *Service) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create config file: %v", err)
 	}
-	
+
 	// Write template
 	func() {
 		defer file.Close()
@@ -111,25 +110,47 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 
 	// 7. RUN LOOP
+	// go func() {
+	// 	for {
+	// 		log.Println("[TUNNEL] Starting FRP Client...")
+
+	// 		// Command: ./frpc -c ./data/frpc.toml
+	// 		cmd := exec.Command(frpcBinaryPath, "-c", frpcConfigPath)
+	// 		cmd.Stdout = os.Stdout
+	// 		cmd.Stderr = os.Stderr
+
+	// 		err := cmd.Start()
+	// 		if err != nil {
+	// 			log.Printf("[TUNNEL] Failed to start binary: %v", err)
+	// 			time.Sleep(10 * time.Second)
+	// 			continue
+	// 		}
+
+	// 		err = cmd.Wait()
+	// 		log.Printf("[TUNNEL] Process exited: %v. Restarting in 5 seconds...", err)
+	// 		time.Sleep(5 * time.Second)
+	// 	}
+	// }()
+
 	go func() {
 		for {
-			log.Println("[TUNNEL] Starting FRP Client...")
-			
-			// Command: ./frpc -c ./data/frpc.toml
-			cmd := exec.Command(frpcBinaryPath, "-c", frpcConfigPath)
+			select {
+			case <-ctx.Done():
+				log.Println("[TUNNEL] Context cancelled, stopping frpc")
+				return
+			default:
+			}
+			cmd := exec.CommandContext(ctx, frpcBinaryPath, "-c", frpcConfigPath)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
-
-			err := cmd.Start()
-			if err != nil {
-				log.Printf("[TUNNEL] Failed to start binary: %v", err)
-				time.Sleep(10 * time.Second)
-				continue
+			if err := cmd.Run(); err != nil && ctx.Err() == nil {
+				log.Printf("[TUNNEL] frpc exited: %v. Restarting in 5s...", err)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(5 * time.Second):
+				}
 			}
-
-			err = cmd.Wait()
-			log.Printf("[TUNNEL] Process exited: %v. Restarting in 5 seconds...", err)
-			time.Sleep(5 * time.Second)
 		}
 	}()
 

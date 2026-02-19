@@ -53,17 +53,16 @@ func New(dataDir string, port int, isDev bool) *Cloud {
 }
 
 func NewFromConfig(cfg *config.Config) (*Cloud, error) {
-    c := New(cfg.DataDir, 8080, cfg.IsDev)
-    if err := c.InitFileSystem(); err != nil {
-        return nil, err
-    }
-    return c, nil
+	c := New(cfg.DataDir, 8080, cfg.IsDev)
+	if err := c.InitFileSystem(); err != nil {
+		return nil, err
+	}
+	return c, nil
 }
 
 func (s *Cloud) Start(_ context.Context) error {
-    return nil // Cloud has no background loop; work is done at init and via HTTP
+	return nil // Cloud has no background loop; work is done at init and via HTTP
 }
-
 
 func (s *Cloud) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/status", s.handleStatus)
@@ -84,7 +83,9 @@ func (s *Cloud) InitFileSystem() error {
 	for _, devicePath := range candidates {
 		if _, err := os.Stat(devicePath); err == nil {
 
-			d := &disk.RealDisk{DevicePath: devicePath}
+			//! SOFT DELETE
+			// d := &disk.RealDisk{DevicePath: devicePath}
+			d := disk.New(s.IsDev)
 
 			err := d.EnsureMounted(ssdMountPoint)
 
@@ -133,15 +134,16 @@ func (s *Cloud) InitFileSystem() error {
 	return nil
 }
 
-func (s *Cloud) GetRoutes() map[string]http.HandlerFunc {
-	return map[string]http.HandlerFunc{
-		"/api/status":            s.handleStatus,
-		"/api/files":             s.handleFiles,
-		"/api/mkdir":             s.handleMkdir,
-		"/api/delete":            s.handleDelete,
-		"/strct_agent/fs/upload": s.handleUpload,
-	}
-}
+//! soft delete
+// func (s *Cloud) GetRoutes() map[string]http.HandlerFunc {
+// 	return map[string]http.HandlerFunc{
+// 		"/api/status":            s.handleStatus,
+// 		"/api/files":             s.handleFiles,
+// 		"/api/mkdir":             s.handleMkdir,
+// 		"/api/delete":            s.handleDelete,
+// 		"/strct_agent/fs/upload": s.handleUpload,
+// 	}
+// }
 
 func (s *Cloud) handleStatus(w http.ResponseWriter, r *http.Request) {
 	realFree, _ := disk.GetFreeDiskSpace(s.DataDir)

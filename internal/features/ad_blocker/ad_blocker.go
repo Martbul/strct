@@ -77,8 +77,11 @@ func (a *AdBlocker) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/adblock/toggle", a.HandleToggle)
 }
 
+//!todo: check the ticker canceletion 
 // ! implement canceling loginc with ctx context.Context
 func (a *AdBlocker) Start(ctx context.Context) error {
+	// ticker := time.NewTicker(interval) 
+   //  defer ticker.Stop()
 	log.Println("[AD_BLOCKER] Starting Ad Blocker Service")
 
 	// 1. Apply IPTables Rules to redirect traffic from 53 -> 5354

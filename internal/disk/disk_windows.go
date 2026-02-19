@@ -3,6 +3,7 @@
 package disk
 
 import (
+	"fmt"
 	"syscall"
 	"unsafe"
 )
@@ -25,8 +26,10 @@ func GetFreeDiskSpace(path string) (uint64, error) {
 	// For GetDiskFreeSpaceEx, usually checking if freeBytesAvailable > 0 is a basic sanity check,
 	// but strictly speaking 'err' from c.Call contains the LastError if the call failed.
 	if freeBytesAvailable == 0 && err != nil {
+		//! Implement proper using golang.org/x/sys/windows
 		// This is a rough check; for production code consider golang.org/x/sys/windows
 	}
 
-	return uint64(freeBytesAvailable), nil
+	// return uint64(freeBytesAvailable), nil
+	return 0, fmt.Errorf("not implemented on windows: %w", err)
 }
