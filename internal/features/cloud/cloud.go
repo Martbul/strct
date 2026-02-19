@@ -59,16 +59,7 @@ func New(dataDir string, port int, isDev bool) *Cloud {
 	}
 }
 
-// NewFromConfig is the application-level constructor.
-// It replaces the two-step New + InitFileSystem dance that used to live in main.go's buildCloud().
-// main.go now calls this directly:
-//
-//	cloudSvc, err := cloud.NewFromConfig(cfg)
-//
-// instead of:
-//
-//	c := cloud.New(cfg.DataDir, 8080, cfg.IsDev)
-//	if err := c.InitFileSystem(); err != nil { ... }
+
 func NewFromConfig(cfg *config.Config) (*Cloud, error) {
 	c := New(cfg.DataDir, 8080, cfg.IsDev)
 	if err := c.initFileSystem(); err != nil {
@@ -77,12 +68,18 @@ func NewFromConfig(cfg *config.Config) (*Cloud, error) {
 	return c, nil
 }
 
-// Start implements agent.Service. Cloud has no background loop.
+  func NewFromConfig_Test(dataDir string) (*Cloud, error) {
+      c := New(dataDir, 8080, true) 
+      if err := c.initFileSystem(); err != nil {
+          return nil, err
+      }
+      return c, nil
+  }
+
 func (s *Cloud) Start(_ context.Context) error {
 	return nil
 }
 
-// RegisterRoutes registers all cloud HTTP handlers on the given mux.
 func (s *Cloud) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/files", s.handleFiles)
