@@ -11,6 +11,7 @@ import (
 	"time"
 
 	ping "github.com/prometheus-community/pro-bing"
+	"golang.org/x/net/context"
 )
 
 type Config struct {
@@ -43,7 +44,8 @@ func New(cfg Config) *NetworkMonitor {
 	}
 }
 
-func (m *NetworkMonitor) Start() error {
+//! implement canceling loginc with ctx context.Context
+func (m *NetworkMonitor) Start(ctx context.Context) error {
 	log.Printf("[MONITOR] Starting Network Health Monitor (Target: %s, Interval: 30s)", m.Target)
 
 	m.runPing()

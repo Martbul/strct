@@ -1,6 +1,7 @@
 package vpn
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -39,7 +40,8 @@ func New(cfg Config) *VPN {
 	}
 }
 
-func (v *VPN) Start() error {
+//! implement canceling loginc with ctx context.Context
+func (v *VPN) Start(ctx context.Context) error {
 	log.Printf("[VPN] Starting VPN Controller Service...")
 
 	// 1. Initial Check

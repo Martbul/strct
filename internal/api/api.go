@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -17,7 +18,10 @@ type Config struct {
 	IsDev   bool
 }
 
-func Start(cfg Config, routes map[string]http.HandlerFunc) error {
+
+
+//! implement canceling loginc with ctx context.Context
+func Start(ctx context.Context, cfg Config, routes map[string]http.HandlerFunc) error {
 
 	finalPort := cfg.Port
 	if cfg.IsDev {

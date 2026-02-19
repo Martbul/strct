@@ -2,6 +2,7 @@ package adblocker
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -70,7 +71,8 @@ func New(cfg AdBlockConfig) *AdBlocker {
 }
 
 
-func (a *AdBlocker) Start() error {
+//! implement canceling loginc with ctx context.Context
+func (a *AdBlocker) Start(ctx context.Context) error {
 	log.Println("[AD_BLOCKER] Starting Ad Blocker Service")
 
 	// 1. Apply IPTables Rules to redirect traffic from 53 -> 5354

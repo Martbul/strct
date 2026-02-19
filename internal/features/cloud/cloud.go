@@ -13,7 +13,7 @@ import (
 
 	"github.com/strct-org/strct-agent/internal/humanize"
 	"github.com/strct-org/strct-agent/internal/netx"
-	"github.com/strct-org/strct-agent/internal/platform/disk"
+	"github.com/strct-org/strct-agent/internal/disk"
 )
 
 type Cloud struct {

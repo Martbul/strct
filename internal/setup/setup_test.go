@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/strct-org/strct-agent/internal/platform/wifi"
+	"github.com/strct-org/strct-agent/internal/wifi"
 )
 
 type SpyWiFi struct {

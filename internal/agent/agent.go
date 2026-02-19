@@ -1,6 +1,8 @@
+// The goal is: agent.go should only orchestrate lifecycles, not construct dependencies or know about HTTP routes.
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -19,8 +21,8 @@ import (
 	"github.com/strct-org/strct-agent/internal/features/router"
 	"github.com/strct-org/strct-agent/internal/features/vpn"
 	"github.com/strct-org/strct-agent/internal/network/tunnel"
-	"github.com/strct-org/strct-agent/internal/platform/wifi"
 	"github.com/strct-org/strct-agent/internal/setup"
+	"github.com/strct-org/strct-agent/internal/wifi"
 )
 
 const (
@@ -41,7 +43,8 @@ type HTTPFeature interface {
 }
 
 type Runner interface {
-	Start() error
+	Start(ctx context.Context) error
+	//  Stop()
 }
 
 type APIService struct {
@@ -53,8 +56,8 @@ type ProfilerService struct {
 	Port int
 }
 
-func (s *APIService) Start() error {
-	return api.Start(s.Config, s.Routes)
+func (s *APIService) Start(ctx context.Context) error {
+	return api.Start(ctx, s.Config, s.Routes)
 }
 
 func New(cfg *config.Config) *Agent {
@@ -197,7 +200,7 @@ func (a *Agent) ensureConnectivity() error {
 	return nil
 }
 
-func (a *Agent) Start() {
+func (a *Agent) Start(ctx context.Context) {
 	var wg sync.WaitGroup
 	log.Println("--- Strct Agent Starting ---")
 
@@ -205,7 +208,7 @@ func (a *Agent) Start() {
 		wg.Add(1)
 		go func(r Runner) {
 			defer wg.Done()
-			if err := r.Start(); err != nil {
+			if err := r.Start(ctx); err != nil {
 				log.Printf("[CRITICAL] Component crashed: %v", err)
 			}
 		}(runner)
@@ -230,7 +233,8 @@ func (a *Agent) runSetupWizard() {
 	time.Sleep(2 * time.Second)
 }
 
-func (p *ProfilerService) Start() error {
+// ! implement canceling loginc with ctx context.Context
+func (p *ProfilerService) Start(ctx context.Context) error {
 	addr := fmt.Sprintf("0.0.0.0:%d", p.Port)
 	log.Printf("[PPROF] Profiling server started on http://%s/debug/pprof", addr)
 

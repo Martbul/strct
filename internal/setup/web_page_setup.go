@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/strct-org/strct-agent/internal/platform/wifi"
+	"github.com/strct-org/strct-agent/internal/wifi"
 	"github.com/strct-org/strct-agent/internal/templates"
 )
 

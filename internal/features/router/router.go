@@ -3,6 +3,7 @@ package router
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -81,7 +82,9 @@ func New(cfg Config) *RouterController {
 	}
 }
 
-func (r *RouterController) Start() error {
+
+//! implement canceling loginc with ctx context.Context
+func (r *RouterController) Start(ctx context.Context) error {
 	log.Printf("[ROUTER] Starting Router Control Service")
 
 	go r.applySystemConfig()

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 	"os/signal"
@@ -12,12 +13,14 @@ import (
 
 func main() {
 	cfg := config.Load()
-	
+
 	agent := agent.New(cfg)
 
 	agent.Initialize()
 
-	go agent.Start()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	go agent.Start(ctx)
 
 	waitForShutdown()
 }
