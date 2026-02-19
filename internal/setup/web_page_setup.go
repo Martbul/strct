@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/strct-org/strct-agent/internal/platform/wifi"
-	"github.com/strct-org/strct-agent/internal/setup/templates"
 )
 
 type Credentials struct {
@@ -67,7 +66,7 @@ func StartCaptivePortal(wifiMgr wifi.Provider, done chan<- bool, devMode bool) {
 		w.Header().Set("Pragma", "no-cache")
 		w.Header().Set("Expires", "0")
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, templates.HtmlPage)
+		fmt.Fprint(w, HtmlPage)
 	})
 
 	port := ":80"

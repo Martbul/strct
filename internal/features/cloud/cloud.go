@@ -19,6 +19,8 @@ import (
 	"github.com/strct-org/strct-agent/internal/platform/disk"
 )
 
+// Cloud manages local file storage and exposes it over HTTP.
+// Construct via NewFromConfig — do not use New directly from main.
 type Cloud struct {
 	StartTime time.Time
 	DataDir   string
@@ -26,7 +28,7 @@ type Cloud struct {
 	IsDev     bool
 }
 
-// JSON shape returned by /api/status
+// StatusResponse is the JSON shape returned by /api/status.
 type StatusResponse struct {
 	Uptime   int64  `json:"uptime"`
 	IP       string `json:"ip"`
@@ -35,11 +37,12 @@ type StatusResponse struct {
 	IsOnline bool   `json:"isOnline"`
 }
 
-// JSON shape returned by /api/files.
+// FilesResponse is the JSON shape returned by /api/files.
 type FilesResponse struct {
 	Files []FileItem `json:"files"`
 }
 
+// FileItem represents a single file or folder entry.
 type FileItem struct {
 	Name       string `json:"name"`
 	Size       string `json:"size"`
@@ -47,6 +50,7 @@ type FileItem struct {
 	ModifiedAt string `json:"modifiedAt"`
 }
 
+// New is the base constructor. Prefer NewFromConfig in application code.
 func New(dataDir string, port int, isDev bool) *Cloud {
 	return &Cloud{
 		DataDir: dataDir,
@@ -55,6 +59,16 @@ func New(dataDir string, port int, isDev bool) *Cloud {
 	}
 }
 
+// NewFromConfig is the application-level constructor.
+// It replaces the two-step New + InitFileSystem dance that used to live in main.go's buildCloud().
+// main.go now calls this directly:
+//
+//	cloudSvc, err := cloud.NewFromConfig(cfg)
+//
+// instead of:
+//
+//	c := cloud.New(cfg.DataDir, 8080, cfg.IsDev)
+//	if err := c.InitFileSystem(); err != nil { ... }
 func NewFromConfig(cfg *config.Config) (*Cloud, error) {
 	c := New(cfg.DataDir, 8080, cfg.IsDev)
 	if err := c.initFileSystem(); err != nil {
@@ -63,10 +77,12 @@ func NewFromConfig(cfg *config.Config) (*Cloud, error) {
 	return c, nil
 }
 
+// Start implements agent.Service. Cloud has no background loop.
 func (s *Cloud) Start(_ context.Context) error {
-	return nil // Cloud has no background loop; work is done at init and via HTTP
+	return nil
 }
 
+// RegisterRoutes registers all cloud HTTP handlers on the given mux.
 func (s *Cloud) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/files", s.handleFiles)
@@ -75,28 +91,36 @@ func (s *Cloud) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /strct_agent/fs/upload", s.handleUpload)
 	mux.Handle("/files/", http.StripPrefix("/files/", http.FileServer(http.Dir(s.DataDir))))
 }
+
+// initFileSystem detects storage, mounts SSD if present, then ensures the
+// data directory exists. Unexported because it must be called exactly once
+// by NewFromConfig — callers should never call it directly.
 func (s *Cloud) initFileSystem() error {
-	candidates := []string{"/dev/nvme0n1", "/dev/sda"}
-	const ssdMountPoint = "/mnt/strct_data"
+	// SSD detection is hardware-only. In dev mode we always use the
+	// configured DataDir (./data) so local test files remain visible.
+	if !s.IsDev {
+		candidates := []string{"/dev/nvme0n1", "/dev/sda"}
+		const ssdMountPoint = "/mnt/strct_data"
 
-	for _, devicePath := range candidates {
-		if _, err := os.Stat(devicePath); err != nil {
-			continue // device not present
+		for _, devicePath := range candidates {
+			if _, err := os.Stat(devicePath); err != nil {
+				continue // device not present on this machine
+			}
+
+			d := &disk.RealDisk{DevicePath: devicePath}
+			if err := d.EnsureMounted(ssdMountPoint); err != nil {
+				slog.Warn("storage: device detected but could not mount (unformatted?)",
+					"device", devicePath, "err", err)
+				continue
+			}
+
+			slog.Info("storage: SSD selected",
+				"device", devicePath,
+				"mount", ssdMountPoint,
+			)
+			s.DataDir = ssdMountPoint
+			break
 		}
-
-		d := disk.New(s.IsDev)
-		if err := d.EnsureMounted(ssdMountPoint); err != nil {
-			slog.Warn("storage: device detected but could not mount (unformatted?)",
-				"device", devicePath, "err", err)
-			continue
-		}
-
-		slog.Info("storage: SSD selected",
-			"device", devicePath,
-			"mount", ssdMountPoint,
-		)
-		s.DataDir = ssdMountPoint
-		break
 	}
 
 	// Log which storage path is actually in use
@@ -117,9 +141,12 @@ func (s *Cloud) initFileSystem() error {
 	return nil
 }
 
+// ---------------------------------------------------------------------------
+// HTTP handlers
+// ---------------------------------------------------------------------------
+
 func (s *Cloud) handleStatus(w http.ResponseWriter, r *http.Request) {
 	realFree, _ := disk.GetFreeDiskSpace(s.DataDir)
-
 	userUsed, err := disk.GetDirSize(s.DataDir)
 	if err != nil {
 		slog.Error("cloud: failed to calculate dir size", "err", err)
@@ -259,6 +286,11 @@ func (s *Cloud) handleUpload(w http.ResponseWriter, r *http.Request) {
 	httputil.JSON(w, http.StatusCreated, map[string]string{"status": "uploaded"})
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// secureJoin safely joins a user-supplied path under root, rejecting traversal.
 func secureJoin(root, userPath string) (string, error) {
 	if userPath == "" {
 		userPath = "/"

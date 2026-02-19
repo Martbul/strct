@@ -81,15 +81,12 @@ func New(cfg Config) *RouterController {
 	}
 }
 func NewFromConfig(cfg *config.Config) *RouterController {
-	backend := cfg.BackendURL
-	if backend == "" {
-		backend = "https://dev.api.strct.org"
-	}
 	return New(Config{
 		DeviceID:   cfg.DeviceID,
-		BackendURL: backend,
+		BackendURL: cfg.EffectiveBackendURL(),
 	})
 }
+
 func (rc *RouterController) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/router/devices", rc.HandleGetDevices)
 	mux.HandleFunc("/api/router/block", rc.HandleBlockDevice)

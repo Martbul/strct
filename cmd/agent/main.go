@@ -43,7 +43,6 @@ func main() {
 		"dataDir", cfg.DataDir,
 	)
 
-
 	// --- Construct features ---
 	cloudSvc, err := cloud.NewFromConfig(cfg)
 	if err != nil {
@@ -54,12 +53,11 @@ func main() {
 	adblockSvc := adblocker.NewDefault()
 	routerSvc := router.NewFromConfig(cfg)
 	vpnSvc := vpn.NewFromConfig(cfg)
-	tunnelSvc := tunnel.New(cfg)
+	tunnelSvc := tunnel.NewFromConfig(cfg)
 
 	apiSvc := buildAPI(cfg, cloudSvc, monitorSvc, adblockSvc, routerSvc, vpnSvc)
 
-
-a, err := agent.New(cfg, wifi.New(cfg.IsArm64()), []agent.Service{
+	a, err := agent.New(cfg, wifi.New(cfg.IsArm64()), []agent.Service{
 		cloudSvc,
 		monitorSvc,
 		adblockSvc,
@@ -79,7 +77,6 @@ a, err := agent.New(cfg, wifi.New(cfg.IsArm64()), []agent.Service{
 	a.Start(ctx)
 	slog.Info("agent: shutdown complete")
 }
-
 
 // buildAPI assembles the HTTP mux. Each feature registers its own routes.
 func buildAPI(

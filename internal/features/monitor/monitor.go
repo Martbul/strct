@@ -44,13 +44,9 @@ func New(cfg MonitorConfig) *NetworkMonitor {
 }
 
 func NewFromConfig(cfg *config.Config) *NetworkMonitor {
-	backend := cfg.BackendURL
-	if backend == "" {
-		backend = "https://dev.api.strct.org"
-	}
 	return New(MonitorConfig{
 		DeviceID:   cfg.DeviceID,
-		BackendURL: backend,
+		BackendURL: cfg.EffectiveBackendURL(),
 		AuthToken:  cfg.AuthToken,
 	})
 }
