@@ -6,81 +6,76 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/strct-org/strct-agent/internal/errs"
 )
 
-const OpStart errs.Op = "api.Start"
+const opStart errs.Op = "api.Server.Start"
 
+// Config holds the server configuration.
 type Config struct {
 	DataDir string
 	Port    int
 	IsDev   bool
 }
 
+// Server is a runnable HTTP server.
+// It accepts a pre-built mux so route registration stays in main.
+type Server struct {
+	cfg Config
+	mux *http.ServeMux
+}
 
+// New returns a Server ready to Start.
+func New(cfg Config, mux *http.ServeMux) *Server {
+	return &Server{cfg: cfg, mux: mux}
+}
 
-//! implement canceling loginc with ctx context.Context
-func Start(ctx context.Context, cfg Config, routes map[string]http.HandlerFunc) error {
-
-	finalPort := cfg.Port
-	if cfg.IsDev {
-		if cfg.Port <= 1024 {
-			log.Printf("[API] Dev Mode detected: Switching from privileged port %d to 8080", cfg.Port)
-			finalPort = 8080
-		}
+// Start implements agent.Service.
+func (s *Server) Start(ctx context.Context) error {
+	port := s.cfg.Port
+	if s.cfg.IsDev && port <= 1024 {
+		log.Printf("[API] Dev mode: redirecting port %d → 8080", port)
+		port = 8080
 	}
 
-	mux := http.NewServeMux()
-
-	for path, handler := range routes {
-		mux.HandleFunc(path, handler)
+	srv := &http.Server{
+		Addr:    fmt.Sprintf(":%d", port),
+		Handler: corsMiddleware(s.mux),
 	}
 
-	if cfg.DataDir != "" {
-		fileHandler := http.StripPrefix("/files/", http.FileServer(http.Dir(cfg.DataDir)))
-		mux.Handle("/files/", fileHandler)
+	go func() {
+		<-ctx.Done()
+		log.Println("[API] Shutting down...")
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(shutCtx)
+	}()
+
+	log.Printf("[API] Listening on :%d (dev=%v)", port, s.cfg.IsDev)
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		return errs.E(opStart, errs.KindNetwork, err, fmt.Sprintf("server failed on port %d", port))
 	}
-
-	addr := fmt.Sprintf(":%d", finalPort)
-	log.Printf("[API] Starting Native Server on port %d serving %s (Dev: %v)", finalPort, cfg.DataDir, cfg.IsDev)
-
-	handlerWithCors := corsMiddleware(mux)
-
-	if err := http.ListenAndServe(addr, handlerWithCors); err != nil {
-		return errs.E(OpStart, errs.KindNetwork, err, fmt.Sprintf("server failed on port %d", finalPort))
-	}
-
 	return nil
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-
-		allowed := false
-		
-		if strings.HasPrefix(origin, "http://localhost") {
-			allowed = true
-		}
-		
-		if strings.HasSuffix(origin, ".strct.org") || origin == "https://strct.org" {
-			allowed = true
-		}
-
-		if allowed {
+		if strings.HasPrefix(origin, "http://localhost") ||
+			strings.HasSuffix(origin, ".strct.org") ||
+			origin == "https://strct.org" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
-
-		if r.Method == "OPTIONS" {
+		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Range")
 			w.Header().Set("Access-Control-Max-Age", "3600")
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-
 		next.ServeHTTP(w, r)
 	})
 }

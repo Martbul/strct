@@ -1,7 +1,6 @@
 package config
 
 import (
-	"flag"
 	"log"
 	"os"
 	"runtime"
@@ -24,23 +23,23 @@ type Config struct {
 	IsDev              bool
 }
 
-func Load() *Config {
-	devMode := flag.Bool("dev", false, "Run in development mode (Mock hardware)")
-	flag.Parse()
-
+// Load reads environment variables and returns a Config.
+// devMode is passed in from main so that flag parsing stays in main.
+func Load(devMode bool) *Config {
 	if err := godotenv.Load(); err != nil {
 		log.Println("[CONFIG] No .env file found, relying on system env vars")
 	}
 
 	cfg := &Config{
-		IsDev:              *devMode,
+		IsDev:              devMode,
 		VPSIP:              getEnv("VPS_IP", "127.0.0.1"),
 		VPSPort:            getEnvAsInt("VPS_PORT", 7000),
 		AuthToken:          getEnv("AUTH_TOKEN", "default-secret"),
 		Domain:             getEnv("DOMAIN", "localhost"),
+		BackendURL:         getEnv("BACKEND_URL", ""),
 		PprofPort:          getEnvAsInt("PPROF_PORT", 6060),
-		TailScaleClientId:  getEnv("TAILSCALE_CLIENT_ID", "no_ts_client_id"),
-		TailScaleAuthToken: getEnv("TAILSCALE_AUTH_TOKEN", "no_auth_token"),
+		TailScaleClientId:  getEnv("TAILSCALE_CLIENT_ID", ""),
+		TailScaleAuthToken: getEnv("TAILSCALE_AUTH_TOKEN", ""),
 	}
 
 	if cfg.IsArm64() {
@@ -56,7 +55,14 @@ func Load() *Config {
 
 func (c *Config) IsArm64() bool {
 	return runtime.GOOS == "linux" && runtime.GOARCH == "arm64" && !c.IsDev
+}
 
+// EffectiveBackendURL returns the configured URL or the default dev URL.
+func (c *Config) EffectiveBackendURL() string {
+	if c.BackendURL != "" {
+		return c.BackendURL
+	}
+	return "https://dev.api.strct.org"
 }
 
 func getEnv(key, fallback string) string {
@@ -73,20 +79,19 @@ func getEnvAsInt(key string, fallback int) int {
 	}
 	val, err := strconv.Atoi(strValue)
 	if err != nil {
-		log.Printf("[CONFIG] Warning: Invalid integer for %s, using default: %d", key, fallback)
+		log.Printf("[CONFIG] Invalid integer for %s, using default %d", key, fallback)
 		return fallback
 	}
 	return val
 }
 
+// --- Wire provider types (used when Wire is wired up) ---
+
 type BackendURL string
 type DataDir string
 
 func ProvideBackendURL(cfg *Config) BackendURL {
-	if cfg.BackendURL != "" {
-		return BackendURL(cfg.BackendURL)
-	}
-	return "https://dev.api.strct.org"
+	return BackendURL(cfg.EffectiveBackendURL())
 }
 
 func ProvideDataDir(cfg *Config) DataDir {

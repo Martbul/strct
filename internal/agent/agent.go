@@ -1,4 +1,3 @@
-// The goal is: agent.go should only orchestrate lifecycles, not construct dependencies or know about HTTP routes.
 package agent
 
 import (
@@ -12,258 +11,118 @@ import (
 
 	_ "net/http/pprof"
 
-	"github.com/strct-org/strct-agent/internal/api"
 	"github.com/strct-org/strct-agent/internal/config"
 	"github.com/strct-org/strct-agent/internal/errs"
-	adblocker "github.com/strct-org/strct-agent/internal/features/ad_blocker"
-	"github.com/strct-org/strct-agent/internal/features/cloud"
-	monitor "github.com/strct-org/strct-agent/internal/features/network_monitor"
-	"github.com/strct-org/strct-agent/internal/features/router"
-	"github.com/strct-org/strct-agent/internal/features/vpn"
-	"github.com/strct-org/strct-agent/internal/network/tunnel"
 	"github.com/strct-org/strct-agent/internal/setup"
 	"github.com/strct-org/strct-agent/internal/wifi"
 )
 
 const (
-	OpAgentInit    errs.Op = "agent.Initialize"
-	OpSetupCloud   errs.Op = "agent.setupCloud"
-	OpCheckConn    errs.Op = "agent.ensureConnectivity"
-	OpStartHotspot errs.Op = "agent.runSetupWizard"
+	opNew          errs.Op = "agent.New"
+	opConnectivity errs.Op = "agent.ensureConnectivity"
+	opHotspot      errs.Op = "agent.runSetupWizard"
 )
 
-type Agent struct {
-	Wifi     wifi.Provider
-	Services []Service
-	Config   *config.Config
-}
-
-type HTTPFeature interface {
-	GetRoutes() map[string]http.HandlerFunc
-}
-
+// Service is anything the agent can lifecycle-manage.
 type Service interface {
 	Start(ctx context.Context) error
-	//  Stop()
 }
 
-type APIService struct {
-	Config api.Config
-	Routes map[string]http.HandlerFunc
+// Agent orchestrates service lifecycles.
+// It does not construct services and does not know about HTTP routes.
+type Agent struct {
+	cfg      *config.Config
+	wifi     wifi.Provider
+	services []Service
 }
 
-type ProfilerService struct {
-	Port int
-}
-
-func (s *APIService) Start(ctx context.Context) error {
-	return api.Start(ctx, s.Config, s.Routes)
-}
-
-// New accepts all dependencies — Wire calls this.
-func New(
-	cfg *config.Config,
-	w wifi.Provider,
-	services []Service, // Wire uses wire.Value or a struct for this — see note
-) (*Agent, error) {
-	a := &Agent{Config: cfg, Wifi: w, Services: services}
-
+// New checks connectivity, then returns a ready Agent.
+// All services are injected by the caller (main).
+func New(cfg *config.Config, w wifi.Provider, services []Service) (*Agent, error) {
+	a := &Agent{cfg: cfg, wifi: w, services: services}
 	if err := a.ensureConnectivity(); err != nil {
-		return nil, errs.E("agent.New", err)
+		return nil, errs.E(opNew, err)
 	}
 	return a, nil
 }
 
-func loadWifiManager(cfg *config.Config) wifi.Provider {
-	var wifiMgr wifi.Provider
-	if cfg.IsArm64() {
-		wifiMgr = &wifi.RealWiFi{Interface: "wlan0"}
-	} else {
-		wifiMgr = &wifi.MockWiFi{}
+// Start runs all services concurrently and blocks until ctx is cancelled
+// or all services exit.
+func (a *Agent) Start(ctx context.Context) {
+	var wg sync.WaitGroup
+	log.Println("--- Strct Agent Starting ---")
+	for _, svc := range a.services {
+		wg.Add(1)
+		go func(s Service) {
+			defer wg.Done()
+			if err := s.Start(ctx); err != nil {
+				log.Printf("[CRITICAL] Service crashed: %v", err)
+			}
+		}(svc)
 	}
-	return wifiMgr
+	wg.Wait()
+	log.Println("--- Strct Agent Stopped ---")
 }
-
-func (a *Agent) Initialize() error {
-	if err := a.ensureConnectivity(); err != nil {
-		return errs.E(OpAgentInit, err)
-	}
-
-	cloud, err := a.setupCloud()
-	if err != nil {
-		return errs.E(OpAgentInit, err)
-	}
-	monitor := a.setupMonitor()
-	adBlocker := a.setupAdBlocker()
-	routerController := a.setupRouterController()
-	vpn := a.setupRouterVPN()
-
-	apiSvc := a.assembleAPIServer(cloud, monitor, adBlocker, routerController, vpn)
-	tunnelSvc := tunnel.New(a.Config)
-	profilerSvc := &ProfilerService{
-		Port: a.Config.PprofPort,
-	}
-
-	a.Services = []Service{
-		monitor,
-		tunnelSvc,
-		apiSvc,
-		profilerSvc,
-		adBlocker,
-		routerController,
-		vpn,
-	}
-
-	return nil
-}
-
-func (a *Agent) setupCloud() (*cloud.Cloud, error) {
-	c := cloud.New(a.Config.DataDir, 8080, a.Config.IsDev)
-	if err := c.InitFileSystem(); err != nil {
-		return nil, errs.E(OpSetupCloud, errs.KindIO, err, "failed to initialize cloud storage")
-	}
-	return c, nil
-}
-
-func (a *Agent) setupMonitor() *monitor.NetworkMonitor {
-	backend := a.Config.BackendURL //! setup the Backend URL in env
-	if backend == "" {
-		backend = "https://dev.api.strct.org" //! using curently only dev mode
-	}
-
-	return monitor.New(monitor.MonitorConfig{
-		DeviceID:   a.Config.DeviceID,
-		BackendURL: backend,
-		AuthToken:  a.Config.AuthToken,
-	})
-}
-
-func (a *Agent) setupAdBlocker() *adblocker.AdBlocker {
-	return adblocker.New(adblocker.AdBlockConfig{})
-}
-
-func (a *Agent) setupRouterController() *router.RouterController {
-	backend := a.Config.BackendURL //! setup the Backend URL in env
-	if backend == "" {
-		backend = "https://dev.api.strct.org" //! using curently only dev mode
-	}
-	return router.New(router.Config{
-		DeviceID:   a.Config.DeviceID,
-		BackendURL: backend,
-	})
-}
-
-func (a *Agent) setupRouterVPN() *vpn.VPN {
-	return vpn.New(vpn.Config{DeviceID: a.Config.DeviceID, AuthKey: a.Config.TailScaleAuthToken})
-}
-
-// func (a *Agent) assembleAPIServer(cloud *cloud.Cloud, monitor *monitor.NetworkMonitor, adBlocker *adblocker.AdBlocker, router *router.RouterController, vpn *vpn.VPN) *APIService {
-// 	routes := cloud.GetRoutes()
-
-// 	routes["/api/health"] = handleHealth
-// 	routes["/api/network/stats"] = monitor.HandleStats
-// 	routes["/api/network/speedtest"] = monitor.HandleSpeedtest
-
-// 	routes["/api/adblock/stats"] = adBlocker.HandleStats
-// 	routes["/api/adblock/toggle"] = adBlocker.HandleToggle
-
-// 	routes["/api/router/devices"] = router.HandleGetDevices
-// 	routes["/api/router/block"] = router.HandleBlockDevice
-
-// 	routes["/api/router/config"] = func(w http.ResponseWriter, r *http.Request) {
-// 		if r.Method == http.MethodPost {
-// 			router.HandleSetConfig(w, r)
-// 		} else {
-// 			router.HandleGetConfig(w, r)
-// 		}
-// 	}
-
-// 	routes["/api/vpn/status"] = vpn.HandleGetStatus
-// 	// routes["/api/vpn/setup"] = vpn.HandleSetup
-// 	routes["/api/vpn/toggle"] = vpn.HandleToggleExitNode
-
-// 	return &APIService{
-// 		Config: api.Config{
-// 			Port:    cloud.Port,
-// 			DataDir: cloud.DataDir,
-// 			IsDev:   cloud.IsDev,
-// 		},
-// 		Routes: routes,
-// 	}
-// }
 
 func (a *Agent) ensureConnectivity() error {
 	if wifi.HasInternet() {
-		log.Println("[INIT] Internet detected. Skipping setup.")
+		log.Println("[INIT] Internet detected")
 		return nil
 	}
-
-	log.Println("[INIT] No Internet detected. Starting Setup Wizard...")
+	log.Println("[INIT] No internet — starting setup wizard")
 	a.runSetupWizard()
-
 	if !wifi.HasInternet() {
-		return errs.E(OpCheckConn, errs.KindNetwork, "still no internet after setup wizard")
+		return errs.E(opConnectivity, errs.KindNetwork, "no internet after setup wizard")
 	}
 	return nil
 }
 
-func (a *Agent) Start(ctx context.Context) {
-    var wg sync.WaitGroup
-    log.Println("--- Strct Agent Starting ---")
-    for _, svc := range a.Services {
-        wg.Add(1)
-        go func(s Service) {
-            defer wg.Done()
-            if err := s.Start(ctx); err != nil {
-                log.Printf("[CRITICAL] Service crashed: %v", err)
-            }
-        }(svc)
-    }
-    wg.Wait()
-}
-
 func (a *Agent) runSetupWizard() {
-	err := a.Wifi.StartHotspot()
-	if err != nil {
-		log.Printf("[SETUP] Failed to create hotspot: %v", errs.E(OpStartHotspot, errs.KindSystem, err))
+	if err := a.wifi.StartHotspot(); err != nil {
+		log.Printf("[SETUP] Hotspot error: %v", errs.E(opHotspot, errs.KindSystem, err))
 	}
-
-	done := make(chan bool)
-
-	go setup.StartCaptivePortal(a.Wifi, done, a.Config.IsDev)
-
-	log.Println("[SETUP] Waiting for user credentials...")
+	done := make(chan bool, 1)
+	go setup.StartCaptivePortal(a.wifi, done, a.cfg.IsDev)
+	log.Println("[SETUP] Waiting for WiFi credentials...")
 	<-done
-
-	a.Wifi.StopHotspot()
+	a.wifi.StopHotspot()
 	time.Sleep(2 * time.Second)
 }
 
-// ! implement canceling loginc with ctx context.Context
-func (p *ProfilerService) Start(ctx context.Context) error {
-	addr := fmt.Sprintf("0.0.0.0:%d", p.Port)
-	log.Printf("[PPROF] Profiling server started on http://%s/debug/pprof", addr)
+// ---------------------------------------------------------------------------
+// Built-in services (small enough to live in this package)
+// ---------------------------------------------------------------------------
 
-	return http.ListenAndServe(addr, nil)
+// ProfilerService exposes pprof on a dedicated port.
+type ProfilerService struct {
+	Port int
 }
 
-func handleHealth(w http.ResponseWriter, r *http.Request) {
-	type HealthResponse struct {
+func (p *ProfilerService) Start(ctx context.Context) error {
+	srv := &http.Server{Addr: fmt.Sprintf("0.0.0.0:%d", p.Port)}
+	log.Printf("[PPROF] Listening on http://0.0.0.0:%d/debug/pprof", p.Port)
+	go func() {
+		<-ctx.Done()
+		srv.Close()
+	}()
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		return err
+	}
+	return nil
+}
+
+// HealthHandler reports agent-level status.
+// Registered by main alongside feature routes.
+func HealthHandler(w http.ResponseWriter, r *http.Request) {
+	type response struct {
 		Status    string `json:"status"`
 		Internet  bool   `json:"internet_access"`
 		Timestamp string `json:"timestamp"`
 	}
-
-	response := HealthResponse{
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response{
 		Status:    "ok",
 		Internet:  wifi.HasInternet(),
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("[API] Failed to write health response: %v", err)
-	}
+	})
 }

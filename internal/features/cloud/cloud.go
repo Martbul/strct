@@ -1,6 +1,7 @@
 package cloud
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/strct-org/strct-agent/internal/config"
 	"github.com/strct-org/strct-agent/internal/disk"
 	"github.com/strct-org/strct-agent/internal/humanize"
 	"github.com/strct-org/strct-agent/internal/netx"
@@ -49,6 +51,19 @@ func New(dataDir string, port int, isDev bool) *Cloud {
 		IsDev:   isDev,
 	}
 }
+
+func NewFromConfig(cfg *config.Config) (*Cloud, error) {
+    c := New(cfg.DataDir, 8080, cfg.IsDev)
+    if err := c.InitFileSystem(); err != nil {
+        return nil, err
+    }
+    return c, nil
+}
+
+func (s *Cloud) Start(_ context.Context) error {
+    return nil // Cloud has no background loop; work is done at init and via HTTP
+}
+
 
 func (s *Cloud) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/status", s.handleStatus)
