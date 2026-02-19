@@ -1,3 +1,4 @@
+//? HTTP server plumbing (cors, server)
 package api
 
 import (

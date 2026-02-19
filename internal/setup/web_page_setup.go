@@ -8,8 +8,8 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/strct-org/strct-agent/internal/wifi"
-	"github.com/strct-org/strct-agent/internal/templates"
+	"github.com/strct-org/strct-agent/internal/platform/wifi"
+	"github.com/strct-org/strct-agent/internal/setup/templates"
 )
 
 type Credentials struct {

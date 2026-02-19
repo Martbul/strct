@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,9 +13,10 @@ import (
 	"time"
 
 	"github.com/strct-org/strct-agent/internal/config"
-	"github.com/strct-org/strct-agent/internal/disk"
+	"github.com/strct-org/strct-agent/internal/httputil"
 	"github.com/strct-org/strct-agent/internal/humanize"
 	"github.com/strct-org/strct-agent/internal/netx"
+	"github.com/strct-org/strct-agent/internal/platform/disk"
 )
 
 type Cloud struct {
@@ -25,6 +26,7 @@ type Cloud struct {
 	IsDev     bool
 }
 
+// JSON shape returned by /api/status
 type StatusResponse struct {
 	Uptime   int64  `json:"uptime"`
 	IP       string `json:"ip"`
@@ -33,6 +35,7 @@ type StatusResponse struct {
 	IsOnline bool   `json:"isOnline"`
 }
 
+// JSON shape returned by /api/files.
 type FilesResponse struct {
 	Files []FileItem `json:"files"`
 }
@@ -54,7 +57,7 @@ func New(dataDir string, port int, isDev bool) *Cloud {
 
 func NewFromConfig(cfg *config.Config) (*Cloud, error) {
 	c := New(cfg.DataDir, 8080, cfg.IsDev)
-	if err := c.InitFileSystem(); err != nil {
+	if err := c.initFileSystem(); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -65,60 +68,41 @@ func (s *Cloud) Start(_ context.Context) error {
 }
 
 func (s *Cloud) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/api/status", s.handleStatus)
-	mux.HandleFunc("/api/files", s.handleFiles)
-	mux.HandleFunc("/api/mkdir", s.handleMkdir)
-	mux.HandleFunc("/api/delete", s.handleDelete)
-	mux.HandleFunc("/strct_agent/fs/upload", s.handleUpload)
+	mux.HandleFunc("GET /api/status", s.handleStatus)
+	mux.HandleFunc("GET /api/files", s.handleFiles)
+	mux.HandleFunc("POST /api/mkdir", s.handleMkdir)
+	mux.HandleFunc("DELETE /api/delete", s.handleDelete)
+	mux.HandleFunc("POST /strct_agent/fs/upload", s.handleUpload)
 	mux.Handle("/files/", http.StripPrefix("/files/", http.FileServer(http.Dir(s.DataDir))))
 }
-
-func (s *Cloud) InitFileSystem() error {
+func (s *Cloud) initFileSystem() error {
 	candidates := []string{"/dev/nvme0n1", "/dev/sda"}
-
 	const ssdMountPoint = "/mnt/strct_data"
 
-	ssdSelected := false
-
 	for _, devicePath := range candidates {
-		if _, err := os.Stat(devicePath); err == nil {
-
-			//! SOFT DELETE
-			// d := &disk.RealDisk{DevicePath: devicePath}
-			d := disk.New(s.IsDev)
-
-			err := d.EnsureMounted(ssdMountPoint)
-
-			if err == nil {
-				// SUCCESS: SSD is formatted and mounted
-				log.Printf("------------------------------------------------")
-				log.Printf("[STORAGE] PRIORITY SELECT: SSD SELECTED")
-				log.Printf("[STORAGE] Device: %s", devicePath)
-				log.Printf("[STORAGE] Mount:  %s", ssdMountPoint)
-				log.Printf("------------------------------------------------")
-
-				// Update the Cloud struct to use this new path
-				s.DataDir = ssdMountPoint
-				ssdSelected = true
-				break
-			} else {
-				// Device exists but failed to mount (likely unformatted)
-				log.Printf("[STORAGE] Detected %s but could not mount (Unformatted?): %v", devicePath, err)
-			}
+		if _, err := os.Stat(devicePath); err != nil {
+			continue // device not present
 		}
+
+		d := disk.New(s.IsDev)
+		if err := d.EnsureMounted(ssdMountPoint); err != nil {
+			slog.Warn("storage: device detected but could not mount (unformatted?)",
+				"device", devicePath, "err", err)
+			continue
+		}
+
+		slog.Info("storage: SSD selected",
+			"device", devicePath,
+			"mount", ssdMountPoint,
+		)
+		s.DataDir = ssdMountPoint
+		break
 	}
 
-	// 2. Fallback to SD Card if no SSD was successfully mounted
-	if !ssdSelected {
-		log.Printf("------------------------------------------------")
-		log.Printf("[STORAGE] PRIORITY SELECT: SD CARD / INTERNAL")
-		log.Printf("[STORAGE] Reason: No formatted SSD found or mounted.")
-		log.Printf("[STORAGE] Path:   %s", s.DataDir)
-		log.Printf("------------------------------------------------")
-	}
+	// Log which storage path is actually in use
+	slog.Info("storage: active path", "dir", s.DataDir)
 
-	// 3. Initialize the directory (Ensure it exists)
-	// This runs on s.DataDir, which is now either the SSD path OR the original SD path
+	// Resolve to absolute path so later joins are unambiguous
 	absPath, err := filepath.Abs(s.DataDir)
 	if err != nil {
 		absPath = filepath.Clean(s.DataDir)
@@ -126,61 +110,42 @@ func (s *Cloud) InitFileSystem() error {
 	s.DataDir = absPath
 
 	if err := os.MkdirAll(s.DataDir, 0755); err != nil {
-		log.Printf("[CLOUD] Error creating data directory: %v", err)
-		return err
+		return fmt.Errorf("cloud: could not create data directory %s: %w", s.DataDir, err)
 	}
 
 	s.StartTime = time.Now()
 	return nil
 }
 
-//! soft delete
-// func (s *Cloud) GetRoutes() map[string]http.HandlerFunc {
-// 	return map[string]http.HandlerFunc{
-// 		"/api/status":            s.handleStatus,
-// 		"/api/files":             s.handleFiles,
-// 		"/api/mkdir":             s.handleMkdir,
-// 		"/api/delete":            s.handleDelete,
-// 		"/strct_agent/fs/upload": s.handleUpload,
-// 	}
-// }
-
 func (s *Cloud) handleStatus(w http.ResponseWriter, r *http.Request) {
 	realFree, _ := disk.GetFreeDiskSpace(s.DataDir)
 
 	userUsed, err := disk.GetDirSize(s.DataDir)
 	if err != nil {
-		log.Printf("Error calculating dir size: %v", err)
+		slog.Error("cloud: failed to calculate dir size", "err", err)
 	}
 
-	virtualTotal := userUsed + realFree
-
-	localIP := netx.GetOutboundIP()
-	uptime := int64(time.Since(s.StartTime).Seconds())
-
-	resp := StatusResponse{
+	httputil.OK(w, StatusResponse{
 		IsOnline: true,
 		Used:     userUsed,
-		Total:    virtualTotal,
-		IP:       localIP,
-		Uptime:   uptime,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+		Total:    userUsed + realFree,
+		IP:       netx.GetOutboundIP(),
+		Uptime:   int64(time.Since(s.StartTime).Seconds()),
+	})
 }
 
 func (s *Cloud) handleFiles(w http.ResponseWriter, r *http.Request) {
 	reqPath := r.URL.Query().Get("path")
 	fullPath, err := secureJoin(s.DataDir, reqPath)
 	if err != nil {
-		http.Error(w, "Access Denied", http.StatusForbidden)
+		httputil.Forbidden(w)
 		return
 	}
 
 	entries, err := os.ReadDir(fullPath)
 	if err != nil {
-		json.NewEncoder(w).Encode(FilesResponse{Files: []FileItem{}})
+		// Directory might not exist yet — return empty list, not an error
+		httputil.OK(w, FilesResponse{Files: []FileItem{}})
 		return
 	}
 
@@ -190,12 +155,10 @@ func (s *Cloud) handleFiles(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-
 		fileType := "file"
 		if e.IsDir() {
 			fileType = "folder"
 		}
-
 		fileList = append(fileList, FileItem{
 			Name:       e.Name(),
 			Size:       humanize.Bytes(info.Size()),
@@ -204,125 +167,105 @@ func (s *Cloud) handleFiles(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(FilesResponse{Files: fileList})
+	httputil.OK(w, FilesResponse{Files: fileList})
 }
 
 func (s *Cloud) handleMkdir(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var req struct {
 		Path string `json:"path"`
 		Name string `json:"name"`
 	}
-
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		httputil.BadRequest(w, "invalid JSON")
 		return
 	}
-
 	if req.Name == "" || strings.Contains(req.Name, "/") || strings.Contains(req.Name, "\\") {
-		http.Error(w, "Invalid folder name", http.StatusBadRequest)
+		httputil.BadRequest(w, "invalid folder name")
 		return
 	}
 
 	parentDir, err := secureJoin(s.DataDir, req.Path)
 	if err != nil {
-		http.Error(w, "Access Denied", http.StatusForbidden)
+		httputil.Forbidden(w)
 		return
 	}
 
-	newFolderPath := filepath.Join(parentDir, req.Name)
-
-	if err := os.Mkdir(newFolderPath, 0755); err != nil {
+	if err := os.Mkdir(filepath.Join(parentDir, req.Name), 0755); err != nil {
 		if os.IsExist(err) {
-			http.Error(w, "Folder already exists", http.StatusConflict)
+			httputil.Error(w, http.StatusConflict, "folder already exists")
 			return
 		}
-		log.Printf("Error creating folder: %v", err)
-		http.Error(w, "Could not create folder", http.StatusInternalServerError)
+		slog.Error("cloud: failed to create folder", "err", err)
+		httputil.InternalError(w, "could not create folder")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "created"})
+	httputil.JSON(w, http.StatusCreated, map[string]string{"status": "created"})
 }
 
 func (s *Cloud) handleDelete(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "DELETE" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	targetPath := r.URL.Query().Get("path")
-
 	fullPath, err := secureJoin(s.DataDir, targetPath)
 	if err != nil {
-		http.Error(w, "Access Denied", http.StatusForbidden)
+		httputil.Forbidden(w)
 		return
 	}
-
 	if fullPath == s.DataDir {
-		http.Error(w, "Cannot delete root directory", http.StatusForbidden)
+		httputil.Forbidden(w)
 		return
 	}
-
 	if err := os.RemoveAll(fullPath); err != nil {
-		log.Printf("Error deleting %s: %v", fullPath, err)
-		http.Error(w, "Could not delete item", http.StatusInternalServerError)
+		slog.Error("cloud: failed to delete", "path", fullPath, "err", err)
+		httputil.InternalError(w, "could not delete item")
 		return
 	}
-
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Deleted"))
+	httputil.NoContent(w)
 }
 
 func (s *Cloud) handleUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	targetDir := r.URL.Query().Get("path")
 	saveDir, err := secureJoin(s.DataDir, targetDir)
 	if err != nil {
-		http.Error(w, "Access Denied", http.StatusForbidden)
+		httputil.Forbidden(w)
 		return
 	}
 
-	r.ParseMultipartForm(32 << 20)
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		httputil.BadRequest(w, "could not parse multipart form")
+		return
+	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		http.Error(w, "Invalid file", 400)
+		httputil.BadRequest(w, "invalid file field")
 		return
 	}
 	defer file.Close()
 
-	dstPath := filepath.Join(saveDir, header.Filename)
-	dst, err := os.Create(dstPath)
+	dst, err := os.Create(filepath.Join(saveDir, header.Filename))
 	if err != nil {
-		http.Error(w, "Disk error", 500)
+		slog.Error("cloud: failed to create destination file", "err", err)
+		httputil.InternalError(w, "disk error")
 		return
 	}
 	defer dst.Close()
 
-	io.Copy(dst, file)
-	w.Write([]byte("Uploaded"))
+	if _, err := io.Copy(dst, file); err != nil {
+		slog.Error("cloud: failed to write uploaded file", "err", err)
+		httputil.InternalError(w, "upload failed")
+		return
+	}
+
+	httputil.JSON(w, http.StatusCreated, map[string]string{"status": "uploaded"})
 }
 
 func secureJoin(root, userPath string) (string, error) {
 	if userPath == "" {
 		userPath = "/"
 	}
-	clean := filepath.Clean(filepath.Join("/", userPath))
-	full := filepath.Join(root, clean)
-
+	full := filepath.Join(root, filepath.Clean(filepath.Join("/", userPath)))
 	if !strings.HasPrefix(full, root) {
-		return "", fmt.Errorf("path traversal attempt")
+		return "", fmt.Errorf("path traversal attempt: %q", userPath)
 	}
 	return full, nil
 }

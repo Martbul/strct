@@ -1,3 +1,4 @@
+//? lifecycle orchestration only
 package agent
 
 import (
@@ -14,7 +15,7 @@ import (
 	"github.com/strct-org/strct-agent/internal/config"
 	"github.com/strct-org/strct-agent/internal/errs"
 	"github.com/strct-org/strct-agent/internal/setup"
-	"github.com/strct-org/strct-agent/internal/wifi"
+	"github.com/strct-org/strct-agent/internal/platform/wifi"
 )
 
 const (

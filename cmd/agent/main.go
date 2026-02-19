@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"log/slog"
 	"net/http"
 	"os/signal"
 	"syscall"
@@ -11,41 +12,54 @@ import (
 	"github.com/strct-org/strct-agent/internal/agent"
 	"github.com/strct-org/strct-agent/internal/api"
 	"github.com/strct-org/strct-agent/internal/config"
-	adblocker "github.com/strct-org/strct-agent/internal/features/ad_blocker"
+	adblocker "github.com/strct-org/strct-agent/internal/features/adblocker"
 	"github.com/strct-org/strct-agent/internal/features/cloud"
-	monitor "github.com/strct-org/strct-agent/internal/features/network_monitor"
+	monitor "github.com/strct-org/strct-agent/internal/features/monitor"
 	"github.com/strct-org/strct-agent/internal/features/router"
 	"github.com/strct-org/strct-agent/internal/features/vpn"
-	"github.com/strct-org/strct-agent/internal/tunnel"
-	"github.com/strct-org/strct-agent/internal/wifi"
+	"github.com/strct-org/strct-agent/internal/logger"
+	"github.com/strct-org/strct-agent/internal/platform/tunnel"
+	"github.com/strct-org/strct-agent/internal/platform/wifi"
+)
+
+// These are overridden at build time via:
+//
+//	go build -ldflags "-X main.DefaultDomain=strct.org -X main.DefaultVPSIP=157.90.167.157"
+var (
+	DefaultDomain = "localhost"
+	DefaultVPSIP  = "127.0.0.1"
 )
 
 func main() {
 	devMode := flag.Bool("dev", false, "Run in development mode (mock hardware)")
 	flag.Parse()
 
-	cfg := config.Load(*devMode)
+	logger.Init(*devMode)
+
+	cfg := config.Load(*devMode, DefaultDomain, DefaultVPSIP)
+	slog.Info("agent: config loaded",
+		"deviceID", cfg.DeviceID,
+		"dev", cfg.IsDev,
+		"dataDir", cfg.DataDir,
+	)
+
 
 	// --- Construct features ---
-	cloudSvc, err := buildCloud(cfg)
+	cloudSvc, err := cloud.NewFromConfig(cfg)
 	if err != nil {
-		log.Fatalf("[MAIN] Cloud init failed: %v", err)
+		log.Fatalf("cloud init failed: %v", err)
 	}
 
-	monitorSvc  := monitor.NewFromConfig(cfg)
-	adblockSvc  := adblocker.NewDefault()
-	routerSvc   := router.NewFromConfig(cfg)
-	vpnSvc      := vpn.NewFromConfig(cfg)
-	tunnelSvc   := tunnel.New(cfg)
+	monitorSvc := monitor.NewFromConfig(cfg)
+	adblockSvc := adblocker.NewDefault()
+	routerSvc := router.NewFromConfig(cfg)
+	vpnSvc := vpn.NewFromConfig(cfg)
+	tunnelSvc := tunnel.New(cfg)
 
-	// --- Build API server: each feature registers its own routes ---
 	apiSvc := buildAPI(cfg, cloudSvc, monitorSvc, adblockSvc, routerSvc, vpnSvc)
 
-	// --- Wifi provider ---
-	wifiProvider := wifi.New(cfg.IsArm64())
 
-	// --- Wire agent (no feature knowledge inside agent.New) ---
-	a, err := agent.New(cfg, wifiProvider, []agent.Service{
+a, err := agent.New(cfg, wifi.New(cfg.IsArm64()), []agent.Service{
 		cloudSvc,
 		monitorSvc,
 		adblockSvc,
@@ -56,26 +70,18 @@ func main() {
 		&agent.ProfilerService{Port: cfg.PprofPort},
 	})
 	if err != nil {
-		log.Fatalf("[MAIN] Agent init failed: %v", err)
+		log.Fatalf("agent init failed: %v", err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	a.Start(ctx)
-	log.Println("Shutdown complete.")
+	slog.Info("agent: shutdown complete")
 }
 
-// buildCloud initialises the storage layer and returns the cloud service.
-func buildCloud(cfg *config.Config) (*cloud.Cloud, error) {
-	c := cloud.New(cfg.DataDir, 8080, cfg.IsDev)
-	if err := c.InitFileSystem(); err != nil {
-		return nil, err
-	}
-	return c, nil
-}
 
-// buildAPI assembles the mux — each feature owns its route registration.
+// buildAPI assembles the HTTP mux. Each feature registers its own routes.
 func buildAPI(
 	cfg *config.Config,
 	c *cloud.Cloud,
@@ -86,7 +92,7 @@ func buildAPI(
 ) *api.Server {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/api/health", agent.HealthHandler)
+	mux.HandleFunc("GET /api/health", agent.HealthHandler)
 	c.RegisterRoutes(mux)
 	m.RegisterRoutes(mux)
 	ab.RegisterRoutes(mux)

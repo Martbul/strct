@@ -1,7 +1,8 @@
+// ? config loading + device ID
 package config
 
 import (
-	"log"
+	"log/slog"
 	"os"
 	"runtime"
 	"strconv"
@@ -25,17 +26,17 @@ type Config struct {
 
 // Load reads environment variables and returns a Config.
 // devMode is passed in from main so that flag parsing stays in main.
-func Load(devMode bool) *Config {
+func Load(devMode bool, defaultDomain, defaultVPSIP string) *Config {
 	if err := godotenv.Load(); err != nil {
-		log.Println("[CONFIG] No .env file found, relying on system env vars")
+		slog.Debug("config: no .env file found, relying on system env vars")
 	}
 
 	cfg := &Config{
 		IsDev:              devMode,
-		VPSIP:              getEnv("VPS_IP", "127.0.0.1"),
+		VPSIP:              getEnv("VPS_IP", defaultVPSIP),
 		VPSPort:            getEnvAsInt("VPS_PORT", 7000),
 		AuthToken:          getEnv("AUTH_TOKEN", "default-secret"),
-		Domain:             getEnv("DOMAIN", "localhost"),
+		Domain:             getEnv("DOMAIN", defaultDomain),
 		BackendURL:         getEnv("BACKEND_URL", ""),
 		PprofPort:          getEnvAsInt("PPROF_PORT", 6060),
 		TailScaleClientId:  getEnv("TAILSCALE_CLIENT_ID", ""),
@@ -73,27 +74,24 @@ func getEnv(key, fallback string) string {
 }
 
 func getEnvAsInt(key string, fallback int) int {
-	strValue := getEnv(key, "")
-	if strValue == "" {
+	raw := getEnv(key, "")
+	if raw == "" {
 		return fallback
 	}
-	val, err := strconv.Atoi(strValue)
+	v, err := strconv.Atoi(raw)
 	if err != nil {
-		log.Printf("[CONFIG] Invalid integer for %s, using default %d", key, fallback)
+		slog.Warn("config: invalid integer env var, using default",
+			"key", key,
+			"value", raw,
+			"default", fallback,
+		)
 		return fallback
 	}
-	return val
+	return v
 }
-
-// --- Wire provider types (used when Wire is wired up) ---
 
 type BackendURL string
 type DataDir string
 
-func ProvideBackendURL(cfg *Config) BackendURL {
-	return BackendURL(cfg.EffectiveBackendURL())
-}
-
-func ProvideDataDir(cfg *Config) DataDir {
-	return DataDir(cfg.DataDir)
-}
+func ProvideBackendURL(cfg *Config) BackendURL { return BackendURL(cfg.EffectiveBackendURL()) }
+func ProvideDataDir(cfg *Config) DataDir       { return DataDir(cfg.DataDir) }
