@@ -24,21 +24,21 @@ func getOrGenerateDeviceID(isDev bool) string {
 	}
 
 	newID := "device-" + uuid.New().String()
-	slog.Info("init: New Device ID generated:", newID)
+	slog.Info("config: generated new device ID", "id", newID)
 
 	dir := filepath.Dir(filePath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		slog.Warn("init: Could not create directory:", dir, "error", err)
+		slog.Warn("config: could not create device ID directory", "dir", dir, "err", err)
 
 		return newID
 	}
 
 	err = os.WriteFile(filePath, []byte(newID), 0644)
 	if err != nil {
-		slog.Warn("init:  Could not save device ID to disk at:", filePath, "error", err)
+		slog.Warn("config: could not persist device ID", "path", filePath, "err", err)
 
 	} else {
-		slog.Info("init: Device ID saved to:", filePath)
+		slog.Info("config: device ID persisted", "path", filePath)
 
 	}
 

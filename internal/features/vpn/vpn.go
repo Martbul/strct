@@ -132,12 +132,13 @@ func (v *VPN) autoProvision() {
 	v.State.ErrorMessage = "Provisioning device..."
 	v.mu.Unlock()
 
+
 	slog.Info("vpn: enabling IP forwarding")
 	if out, err := exec.Command("sysctl", "-w", "net.ipv4.ip_forward=1").CombinedOutput(); err != nil {
-		slog.Info("vpn: Attempting to set ipv6 forward as well, out:", out)
+		slog.Info("vpn: Attempting to set ipv6 forward as well", "out", string(out))
 	}
 	if out, err := exec.Command("sysctl", "-w", "net.ipv6.conf.all.forwarding=1").CombinedOutput(); err != nil {
-		slog.Info("vpn: Continuing without ipv6 forwarding, out:", out)
+		slog.Info("vpn: Continuing without ipv6 forwarding", "out", string(out))
 	}
 
 	// Run tailscale up
