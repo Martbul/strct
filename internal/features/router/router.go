@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -88,14 +88,14 @@ func NewFromConfig(cfg *config.Config) *RouterController {
 }
 
 func (rc *RouterController) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/api/router/devices", rc.HandleGetDevices)
-	mux.HandleFunc("/api/router/block", rc.HandleBlockDevice)
+	mux.HandleFunc("GET /api/router/devices", rc.HandleGetDevices)
+	mux.HandleFunc("POST /api/router/block", rc.HandleBlockDevice)
 	mux.HandleFunc("GET /api/router/config", rc.HandleGetConfig)
 	mux.HandleFunc("POST /api/router/config", rc.HandleSetConfig)
 }
 
 func (r *RouterController) Start(ctx context.Context) error {
-	log.Printf("[ROUTER] Starting Router Control Service")
+	slog.Info("router: starting")
 
 	go r.applySystemConfig()
 
@@ -124,6 +124,7 @@ func (rc *RouterController) HandleGetConfig(w http.ResponseWriter, req *http.Req
 	json.NewEncoder(w).Encode(rc.State)
 }
 
+// !TODO: HandleSetConfig applies config on every POST, no validation
 func (rc *RouterController) HandleSetConfig(w http.ResponseWriter, req *http.Request) {
 	var newConfig RouterConfig
 	if err := json.NewDecoder(req.Body).Decode(&newConfig); err != nil {
@@ -189,7 +190,7 @@ func (rc *RouterController) applySystemConfig() {
 	cfg := rc.State
 	rc.mu.RUnlock()
 
-	log.Println("[ROUTER] Applying System Configuration...")
+	slog.Info("router: applying system configuration", "config", cfg)
 
 	var nameserver string
 	switch cfg.DNSProvider {
@@ -200,7 +201,6 @@ func (rc *RouterController) applySystemConfig() {
 	default:
 		nameserver = "1.1.1.1"
 	}
-
 
 	//!TODO: Use executil inkection of the exec.command
 	// Write /etc/resolv.conf
@@ -229,7 +229,7 @@ func (rc *RouterController) applySystemConfig() {
 	// In a real scenario, you would use a template engine here.
 	// For this example, we log it, as restarting hostapd drops the connection
 	// which stops the response from reaching the client.
-	log.Printf("[ROUTER] Config Update: SSID=%s Hidden=%v", cfg.SSID, cfg.IsHidden)
+	slog.Info("router: updated Wi-Fi settings", "ssid", cfg.SSID, "hidden", cfg.IsHidden)
 
 	// Example of how you would restart hostapd:
 	// exec.Command("systemctl", "restart", "hostapd").Run()
@@ -247,7 +247,7 @@ func (rc *RouterController) scanDevices() {
 	// Run `arp -a`
 	out, err := exec.Command("arp", "-a").Output()
 	if err != nil {
-		log.Printf("[ROUTER] ARP scan failed: %v", err)
+		slog.Error("router: ARP scan failed", "err", err)
 		return
 	}
 
@@ -308,6 +308,13 @@ func (rc *RouterController) reportDevicesToBackend(devices []ConnectedDevice) {
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(payload))
 	req.Header.Set("Content-Type", "application/json")
 
+	//!TODO: Use one http.Client into the RouterController struct instead of creating a new one for each request
 	client := &http.Client{Timeout: 5 * time.Second}
-	client.Do(req)
+	resp, err := client.Do(req)
+	if err != nil {
+		slog.Error("router: failed to report devices to backend", "err", err)
+		return
+	}
+	defer resp.Body.Close()
+
 }

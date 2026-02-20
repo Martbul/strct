@@ -2,7 +2,7 @@ package setup
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/miekg/dns"
 )
@@ -26,9 +26,9 @@ func StartDNSServer(redirectIP, addr string) *dns.Server {
 	server := &dns.Server{Addr: addr, Net: "udp"}
 
 	go func() {
-		log.Printf("[DNS] Starting DNS Spoofing Server on %s -> %s",addr, redirectIP)
+		slog.Info("Starting DNS Spoofing Server", "addr", addr, "redirectIP", redirectIP)
 		if err := server.ListenAndServe(); err != nil {
-			log.Printf("[DNS] Failed to start server: %v", err)
+			slog.Error("Failed to start DNS server", "err", err)
 		}
 	}()
 

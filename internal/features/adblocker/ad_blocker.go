@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -94,15 +93,14 @@ func NewDefault() *AdBlocker {
 
 // every feature initiaalizs its own routes
 func (a *AdBlocker) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/api/adblock/stats", a.HandleStats)
-	mux.HandleFunc("/api/adblock/toggle", a.HandleToggle)
+	mux.HandleFunc("GET /api/adblock/stats", a.HandleStats)
+	mux.HandleFunc("POST /api/adblock/toggle", a.HandleToggle)
 }
 
 func (a *AdBlocker) Start(ctx context.Context) error {
 	slog.Info("adblocker: starting")
 
 	// go func() {
-	// 	log.Println("[AD_BLOCKER] Applying iptables redirection rules...")
 	// 	// Redirect UDP
 	// 	exec.Command("iptables", "-t", "nat", "-A", "PREROUTING", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-port", "5354").Run()
 	// 	// Redirect TCP (some DNS uses TCP)
@@ -198,7 +196,7 @@ func (a *AdBlocker) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 		// Check Blocklist
 		if a.blocklist[domain] {
-			log.Printf("[BLOCKED] %s", domain)
+			slog.Info("adblocker: blocked query", "domain", domain)
 			a.blockedQueries++
 			a.trafficMap[now].Blocked++
 
@@ -236,7 +234,7 @@ func (a *AdBlocker) forwardDNS(w dns.ResponseWriter, r *dns.Msg, m *dns.Msg) {
 		m.Ns = resp.Ns
 		m.Extra = resp.Extra
 	} else {
-		log.Printf("[AD_BLOCKER] Forwarding error: %v", err)
+		slog.Error("adblocker: DNS forwarding error", "err", err)
 	}
 	w.WriteMsg(m)
 }
@@ -279,11 +277,11 @@ func (a *AdBlocker) HandleToggle(w http.ResponseWriter, r *http.Request) {
 
 // 5. Blocklist Updater
 func (a *AdBlocker) updateBlocklist() {
-	log.Println("[AD_BLOCKER] Downloading blocklist...")
+	slog.Info("adblocker: updating blocklist from source", "url", "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts")
 	client := http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Get("https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts")
 	if err != nil {
-		log.Printf("[AD_BLOCKER] Update failed: %v", err)
+		slog.Error("adblocker: blocklist update failed", "err", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -306,5 +304,5 @@ func (a *AdBlocker) updateBlocklist() {
 	a.mu.Lock()
 	a.blocklist = newList
 	a.mu.Unlock()
-	log.Printf("[AD_BLOCKER] Loaded %d domains.", count)
+	slog.Info("adblocker: blocklist updated", "domains_loaded", count)
 }

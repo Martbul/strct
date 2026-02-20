@@ -3,7 +3,7 @@ package disk
 import (
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,7 +19,7 @@ type Manager interface {
 
 func New(devMode bool) Manager {
 	if devMode {
-		log.Println("[DISK] Factory: Returning MOCK Disk Manager")
+		slog.Info("disk: Factory: Returning MOCK Disk Manager")
 		return &MockDisk{
 			VirtualPath: "VIRTUAL_NVME",
 			IsFormatted: false,
@@ -29,17 +29,18 @@ func New(devMode bool) Manager {
 	if runtime.GOOS == "linux" {
 		path, err := detectDevicePath()
 		if err != nil {
-			log.Printf("[DISK] CRITICAL: Auto-detect failed (%v). Defaulting to /dev/sda", err)
+			slog.Error("disk: Auto-detect failed, defaulting to /dev/sda", "err", err)
 			path = "/dev/sda"
 		}
 
-		log.Printf("[DISK] Factory: Returning REAL Disk Manager targeting %s", path)
+
+		slog.Info("disk: Factory: Returning REAL Disk Manager", "path", path)
 		return &RealDisk{
 			DevicePath: path,
 		}
 	}
 
-	log.Println("[DISK] Factory: OS is not Linux, defaulting to MOCK")
+	slog.Info("disk: Factory: OS is not Linux, defaulting to MOCK")
 	return &MockDisk{
 		VirtualPath: "VIRTUAL_NVME",
 		IsFormatted: false,

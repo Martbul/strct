@@ -1,7 +1,7 @@
 package disk
 
 import (
-	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -18,29 +18,18 @@ func (d *MockDisk) GetStatus() (string, error) {
 }
 
 func (d *MockDisk) Format() error {
-	fmt.Printf("[MOCK DISK] Simulating format of %s...\n", d.VirtualPath)
-	fmt.Println("[MOCK DISK] Creating GPT Table...")
-	time.Sleep(1 * time.Second)
-	fmt.Println("[MOCK DISK] Creating Partition...")
-	time.Sleep(1 * time.Second)
-	fmt.Println("[MOCK DISK] Running mkfs.ext4...")
-	time.Sleep(2 * time.Second)
-	
-	d.IsFormatted = true 
-	fmt.Println("[MOCK DISK] Format Complete.")
+	slog.Debug("mock disk: formatting", "path", d.VirtualPath)
+	d.IsFormatted = true
+	slog.Debug("mock disk: format complete")
 	return nil
 }
 
 func (d *MockDisk) EnsureMounted(mountPoint string) error {
-	fmt.Printf("[MOCK DISK] Ensuring %s is mounted to %s...\n", d.VirtualPath, mountPoint)
-	
+	slog.Debug("mock disk: Ensuring mounted", "path", d.VirtualPath, "mountPoint", mountPoint)
 	time.Sleep(200 * time.Millisecond)
-	fmt.Println("[MOCK DISK] Checking /proc/mounts... (Simulated: Not mounted)")
 
-	fmt.Printf("[MOCK DISK] Creating directory %s...\n", mountPoint)
-
+	slog.Debug("mock disk: created directory", "mountPoint", mountPoint)
 	time.Sleep(500 * time.Millisecond)
-	fmt.Printf("[MOCK DISK] Mounted partition to %s successfully.\n", mountPoint)
-	
+	slog.Debug("mock disk: mount partition succesfuly", "mountPoint", mountPoint)
 	return nil
 }

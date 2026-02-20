@@ -59,7 +59,6 @@ func New(dataDir string, port int, isDev bool) *Cloud {
 	}
 }
 
-
 func NewFromConfig(cfg *config.Config) (*Cloud, error) {
 	c := New(cfg.DataDir, 8080, cfg.IsDev)
 	if err := c.initFileSystem(); err != nil {
@@ -68,13 +67,13 @@ func NewFromConfig(cfg *config.Config) (*Cloud, error) {
 	return c, nil
 }
 
-  func NewFromConfig_Test(dataDir string) (*Cloud, error) {
-      c := New(dataDir, 8080, true) 
-      if err := c.initFileSystem(); err != nil {
-          return nil, err
-      }
-      return c, nil
-  }
+func NewFromConfig_Test(dataDir string) (*Cloud, error) {
+	c := New(dataDir, 8080, true)
+	if err := c.initFileSystem(); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
 
 func (s *Cloud) Start(_ context.Context) error {
 	return nil
@@ -254,6 +253,7 @@ func (s *Cloud) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 50<<30) // 50 GB hard limit
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		httputil.BadRequest(w, "could not parse multipart form")
 		return

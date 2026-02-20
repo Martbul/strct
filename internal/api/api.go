@@ -1,10 +1,11 @@
-//? HTTP server plumbing (cors, server)
+// ? HTTP server plumbing (cors, server)
 package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -32,7 +33,7 @@ func New(cfg Config, mux *http.ServeMux) *Server {
 func (s *Server) Start(ctx context.Context) error {
 	port := s.cfg.Port
 	if s.cfg.IsDev && port <= 1024 {
-		log.Printf("[API] Dev mode: redirecting port %d → 8080", port)
+		slog.Info("api: Dev mode: redirecting API port", "from", port, "to", 8080)
 		port = 8080
 	}
 
@@ -43,14 +44,14 @@ func (s *Server) Start(ctx context.Context) error {
 
 	go func() {
 		<-ctx.Done()
-		log.Println("[API] Shutting down...")
+		slog.Info("api: shutting down")
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		srv.Shutdown(shutCtx)
 	}()
 
-	log.Printf("[API] Listening on :%d (dev=%v)", port, s.cfg.IsDev)
-	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+	slog.Info("api: starting server", "port", port, "isDev", s.cfg.IsDev)
+	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return errs.E(opStart, errs.KindNetwork, err, fmt.Sprintf("server failed on port %d", port))
 	}
 	return nil

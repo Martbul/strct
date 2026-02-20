@@ -3,7 +3,7 @@ package ota
 import (
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"runtime"
@@ -25,7 +25,7 @@ func StartUpdater(cfg Config) {
 	// Check on startup
 	go func() {
 		if err := checkForUpdate(cfg); err != nil {
-			// log.Printf("OTA: Update check failed: %v", err)
+			slog.Error("ota: initial update check failed", "err", err)
 		}
 	}()
 
@@ -33,14 +33,14 @@ func StartUpdater(cfg Config) {
 	go func() {
 		for range ticker.C {
 			if err := checkForUpdate(cfg); err != nil {
-				log.Printf("OTA: Update check failed: %v", err)
+				slog.Error("ota: update check failed", "err", err)
 			}
 		}
 	}()
 }
 
 func checkForUpdate(cfg Config) error {
-	log.Println("OTA: Checking for updates...")
+	slog.Info("ota: checking for updates...")
 
 	resp, err := http.Get(fmt.Sprintf("%s/version.txt", cfg.StorageURL))
 	if err != nil {
@@ -63,11 +63,11 @@ func checkForUpdate(cfg Config) error {
 
 	//less than or equal
 	if vRemote.LTE(vCurrent) {
-		log.Printf("OTA: No update needed. Remote: %s, Current: %s", vRemote, vCurrent)
+		slog.Info("ota: no update needed", "remote_version", vRemote, "current_version", vCurrent)
 		return nil
 	}
 
-	log.Printf("OTA: New version found: %s. Downloading...", vRemote)
+	slog.Info("ota: new version found", "remote_version", vRemote, "current_version", vCurrent)
 
 	// define the binary name based on architecture
 	binName := fmt.Sprintf("strct-agent-%s-%s", runtime.GOOS, runtime.GOARCH)
@@ -107,7 +107,7 @@ func doUpdate(binURL, checksumURL string) error {
 		return fmt.Errorf("update apply failed: %w", err)
 	}
 
-	log.Println("OTA: Update applied successfully! Restarting...")
+	slog.Info("ota: update applied successfully, restarting now")
 
 	os.Exit(0)
 	return nil

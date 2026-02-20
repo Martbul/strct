@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/http"
 	"os/exec"
@@ -36,7 +35,6 @@ type VPN struct {
 }
 
 func New(cfg Config) *VPN {
-	log.Printf("[VPN-DEBUG] Initializing VPN module for DeviceID: %s", cfg.DeviceID)
 	return &VPN{
 		Config: cfg,
 		State:  VPNState{},
@@ -50,8 +48,8 @@ func NewFromConfig(cfg *config.Config) *VPN {
 }
 
 func (v *VPN) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/api/vpn/status", v.HandleGetStatus)
-	mux.HandleFunc("/api/vpn/toggle", v.HandleToggleExitNode)
+	mux.HandleFunc("GET /api/vpn/status", v.HandleGetStatus)
+	mux.HandleFunc("POST /api/vpn/toggle", v.HandleToggleExitNode)
 }
 
 
@@ -100,9 +98,6 @@ func (v *VPN) HandleGetStatus(w http.ResponseWriter, r *http.Request) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
-	// Log only if verbose debugging is needed, otherwise this spams
-	// log.Printf("[VPN-DEBUG] Status requested by %s", r.RemoteAddr)
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v.State)
 }
@@ -114,12 +109,12 @@ func (v *VPN) HandleToggleExitNode(w http.ResponseWriter, r *http.Request) {
 
 	var req ToggleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("[VPN-ERROR] Failed to decode ToggleExitNode request: %v", err)
+		slog.Error("vpn: invalid toggle request", "err", err)
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("[VPN] Received request to set Exit Node: %v", req.Enable)
+	slog.Info("vpn: received toggle exit node request", "enable", req.Enable)
 
 	// Respond immediately, process in background
 	w.WriteHeader(http.StatusOK)
@@ -130,28 +125,27 @@ func (v *VPN) HandleToggleExitNode(w http.ResponseWriter, r *http.Request) {
 
 func (v *VPN) autoProvision() {
 	if v.Config.AuthKey == "" {
-		log.Println("[VPN-ERROR] No AuthKey provided in config. Skipping auto-provision.")
+		slog.Error("vpn: auto-provisioning failed, no AuthKey in config")
 		return
 	}
 
-	log.Println("[VPN] Attempting Auto-Provisioning with Configured Key...")
+	slog.Info("vpn: Attempting Auto-Provisioning with Configured Key...")
 	v.mu.Lock()
 	v.State.ErrorMessage = "Provisioning device..."
 	v.mu.Unlock()
 
-	// Enable IP forwarding (Critical for Orange Pi)
-	log.Println("[VPN-DEBUG] Enabling IPv4/IPv6 forwarding via sysctl...")
+	slog.Info("vpn: enabling IP forwarding")
 	if out, err := exec.Command("sysctl", "-w", "net.ipv4.ip_forward=1").CombinedOutput(); err != nil {
-		log.Printf("[VPN-ERROR] Failed to set ipv4 forward: %v | %s", err, string(out))
+		slog.Info("vpn: Attempting to set ipv6 forward as well, out:", out)
 	}
 	if out, err := exec.Command("sysctl", "-w", "net.ipv6.conf.all.forwarding=1").CombinedOutput(); err != nil {
-		log.Printf("[VPN-ERROR] Failed to set ipv6 forward: %v | %s", err, string(out))
+		slog.Info("vpn: Continuing without ipv6 forwarding, out:", out)
 	}
 
 	// Run tailscale up
 	// We mask the key in logs for security
 	maskedKey := "tskey-..." + v.Config.AuthKey[len(v.Config.AuthKey)-5:]
-	log.Printf("[VPN-DEBUG] Running: tailscale up --authkey=%s --accept-routes", maskedKey)
+	slog.Info("vpn: Running Tailscale Up for Auto-Provisioning, key masked in logs", "masked_key", maskedKey)
 
 	cmd := exec.Command("tailscale", "up",
 		"--authkey="+v.Config.AuthKey,
@@ -161,20 +155,20 @@ func (v *VPN) autoProvision() {
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("[VPN-FATAL] Provisioning Failed: %v", err)
-		log.Printf("[VPN-FATAL] Tailscale Output: %s", string(output))
+		slog.Error("vpn: Provisioning Failed: Command execution error", "err", err)
+		slog.Error("vpn: Provisioning Failed: Command output", "output", string(output))
 
 		v.mu.Lock()
 		v.State.ErrorMessage = fmt.Sprintf("Provisioning failed: %s", strings.TrimSpace(string(output)))
 		v.mu.Unlock()
 	} else {
-		log.Println("[VPN] Provisioning Success. Tailscale is up.")
+		slog.Info("vpn: Provisioning Success. Tailscale is up.")
 		v.refreshStatus()
 	}
 }
 
 func (v *VPN) setExitNode(enable bool) {
-	log.Printf("[VPN-DEBUG] Executing setExitNode(%v)", enable)
+	slog.Info("vpn: setting exit node", "enable", enable)
 
 	// Ensure forwarding is on before enabling
 	if enable {
@@ -190,15 +184,15 @@ func (v *VPN) setExitNode(enable bool) {
 		arg = "--advertise-exit-node=false"
 	}
 
-	log.Printf("[VPN-DEBUG] Running: tailscale set %s", arg)
+	slog.Info("vpn: running tailscale set to toggle exit node", "arg", arg)
 	cmd := exec.Command("tailscale", "set", arg)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("[VPN-ERROR] Failed to toggle Exit Node: %v", err)
-		log.Printf("[VPN-ERROR] Command Output: %s", string(output))
+		slog.Error("vpn: Failed to toggle Exit Node", "err", err)
+		slog.Error("vpn: Failed to toggle Exit Node, command output", "output", string(output))
 	} else {
-		log.Printf("[VPN-DEBUG] Exit Node toggle success. Output: %s", string(output))
+		slog.Info("vpn: Exit Node toggle success, command output", "output", string(output)	)
 	}
 
 	// Trigger immediate status refresh
@@ -209,23 +203,19 @@ func (v *VPN) refreshStatus() {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
-	// Check if binary exists
 	_, err := exec.LookPath("tailscale")
 	v.State.IsInstalled = err == nil
 	if !v.State.IsInstalled {
 		if v.State.IsRunning { // Only log if state changed
-			log.Println("[VPN-ERROR] Tailscale binary not found in PATH")
+			slog.Error("vpn: Tailscale binary not found in PATH")
 		}
 		v.State.IsRunning = false
 		return
 	}
 
-	// Get JSON status
 	cmd := exec.Command("tailscale", "status", "--json")
 	out, err := cmd.Output()
 	if err != nil {
-		// This usually happens if tailscaled is stopped or we are logged out
-		// log.Printf("[VPN-DEBUG] 'tailscale status' failed (likely stopped/logged out): %v", err)
 		v.State.IsRunning = false
 		return
 	}
@@ -233,8 +223,6 @@ func (v *VPN) refreshStatus() {
 	v.State.IsRunning = true
 	v.State.ErrorMessage = ""
 
-	// Parse Status
-	// We map only what we need to avoid struct complexity errors
 	var status struct {
 		Self struct {
 			TailscaleIPs []string `json:"TailscaleIPs"`
@@ -249,34 +237,27 @@ func (v *VPN) refreshStatus() {
 		if len(status.Self.TailscaleIPs) > 0 {
 			v.State.TailscaleIP = status.Self.TailscaleIPs[0]
 		}
-		// Try to find the user account
 		for _, user := range status.User {
-			// Simple heuristic: contains @
 			if strings.Contains(user.LoginName, "@") {
 				v.State.Account = user.LoginName
 				break
 			}
 		}
 	} else {
-		log.Printf("[VPN-ERROR] Failed to parse tailscale status JSON: %v", err)
+		slog.Error("vpn: Failed to parse tailscale status JSON", "err", err)
 	}
 
-	// Check exit node status via `tailscale debug prefs`
-	// This is more reliable than parsing the full JSON map for advertised routes
 	prefsCmd := exec.Command("tailscale", "debug", "prefs")
 	prefsOut, err := prefsCmd.Output()
 	if err != nil {
-		log.Printf("[VPN-ERROR] Failed to get debug prefs: %v", err)
+		slog.Error("vpn: Failed to get debug prefs", "err", err)
 	} else {
 		prefsStr := string(prefsOut)
-		// debug prefs output format is usually: "AdvertisedRoutes: [0.0.0.0/0 ::/0]" or similar
 		hasV4 := strings.Contains(prefsStr, "0.0.0.0/0")
 		hasV6 := strings.Contains(prefsStr, "::/0")
 
 		v.State.IsExitNode = hasV4 || hasV6
 
-		// Optional: Periodic Verbose log of state
-		log.Printf("[VPN-DEBUG] Status Refreshed: IP=%s, ExitNode=%v, Account=%s",
-			v.State.TailscaleIP, v.State.IsExitNode, v.State.Account)
+		slog.Info("vpn: status refreshed", "ip", v.State.TailscaleIP, "exit_node", v.State.IsExitNode, "account", v.State.Account)
 	}
 }
