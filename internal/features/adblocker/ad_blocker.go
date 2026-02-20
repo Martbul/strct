@@ -6,14 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
-	"os/exec"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/miekg/dns"
+	"github.com/strct-org/strct-agent/internal/platform/executil"
 )
 
 const (
@@ -21,6 +22,10 @@ const (
 	addrDNS     = ":5354"
 	maxLogSize  = 50
 )
+
+type commander interface {
+	Run(name string, args ...string) error
+}
 
 type AdBlocker struct {
 	Config         AdBlockConfig
@@ -32,6 +37,7 @@ type AdBlocker struct {
 	logs           []BlockLog
 	trafficMap     map[string]*TrafficPoint
 	dnsServer      *dns.Server
+	cmd            commander
 }
 
 type AdBlockConfig struct{}
@@ -57,9 +63,9 @@ type BlockLog struct {
 	Timestamp int64  `json:"-"`
 }
 
-func New(cfg AdBlockConfig) *AdBlocker {
+func New(cmd commander) *AdBlocker {
 	return &AdBlocker{
-		Config:     cfg,
+		cmd:        cmd,
 		blocklist:  make(map[string]bool),
 		enabled:    true,
 		trafficMap: make(map[string]*TrafficPoint),
@@ -67,9 +73,24 @@ func New(cfg AdBlockConfig) *AdBlocker {
 	}
 }
 
+// func New(cfg AdBlockConfig) *AdBlocker {
+// 	return &AdBlocker{
+// 		Config:     cfg,
+// 		blocklist:  make(map[string]bool),
+// 		enabled:    true,
+// 		trafficMap: make(map[string]*TrafficPoint),
+// 		logs:       make([]BlockLog, 0),
+// 	}
+// }
+
+// NewDefault is what main.go calls — injects the real OS runner.
 func NewDefault() *AdBlocker {
-    return New(AdBlockConfig{})
+	return New(executil.Real{})
 }
+
+// func NewDefault() *AdBlocker {
+// 	return New(AdBlockConfig{})
+// }
 
 // every feature initiaalizs its own routes
 func (a *AdBlocker) RegisterRoutes(mux *http.ServeMux) {
@@ -77,44 +98,73 @@ func (a *AdBlocker) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/adblock/toggle", a.HandleToggle)
 }
 
-//!todo: check the ticker canceletion 
-// ! implement canceling loginc with ctx context.Context
 func (a *AdBlocker) Start(ctx context.Context) error {
-	// ticker := time.NewTicker(interval) 
-   //  defer ticker.Stop()
-	log.Println("[AD_BLOCKER] Starting Ad Blocker Service")
+	slog.Info("adblocker: starting")
+
+	// go func() {
+	// 	log.Println("[AD_BLOCKER] Applying iptables redirection rules...")
+	// 	// Redirect UDP
+	// 	exec.Command("iptables", "-t", "nat", "-A", "PREROUTING", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-port", "5354").Run()
+	// 	// Redirect TCP (some DNS uses TCP)
+	// 	exec.Command("iptables", "-t", "nat", "-A", "PREROUTING", "-p", "tcp", "--dport", "53", "-j", "REDIRECT", "--to-port", "5354").Run()
+	// }()
 
 	// 1. Apply IPTables Rules to redirect traffic from 53 -> 5354
-	// This makes devices think they are talking to port 53, but Linux sends it to us.
 	go func() {
-		log.Println("[AD_BLOCKER] Applying iptables redirection rules...")
-		// Redirect UDP
-		exec.Command("iptables", "-t", "nat", "-A", "PREROUTING", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-port", "5354").Run()
-		// Redirect TCP (some DNS uses TCP)
-		exec.Command("iptables", "-t", "nat", "-A", "PREROUTING", "-p", "tcp", "--dport", "53", "-j", "REDIRECT", "--to-port", "5354").Run()
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		slog.Info("adblocker: applying iptables redirection rules")
+		a.cmd.Run("iptables", "-t", "nat", "-A", "PREROUTING", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-port", "5354")
+		a.cmd.Run("iptables", "-t", "nat", "-A", "PREROUTING", "-p", "tcp", "--dport", "53", "-j", "REDIRECT", "--to-port", "5354")
 	}()
 
-	// 2. Start Blocklist Updater
+	// Blocklist Updater
 	go func() {
 		a.updateBlocklist()
 		ticker := time.NewTicker(24 * time.Hour)
-		for range ticker.C {
-			a.updateBlocklist()
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				slog.Info("adblocker: blocklist updater stopped")
+				return
+			case <-ticker.C:
+				a.updateBlocklist()
+			}
 		}
 	}()
 
-	// 3. Start DNS Server
+	// DNS Server
 	a.dnsServer = &dns.Server{
 		Addr:    addrDNS,
 		Net:     "udp",
-		Handler: a, // Use 'a' as the handler (calls a.ServeDNS)
+		Handler: a,
 	}
 
-	log.Printf("[AD_BLOCKER] DNS Listener running on %s (Redirected from 53) -> %s", addrDNS, upstreamDNS)
+	// Shutdown watcher: when ctx is cancelled, gracefully stop the DNS server.
+	go func() {
+		<-ctx.Done()
+		slog.Info("adblocker: shutting down DNS server")
+		if err := a.dnsServer.Shutdown(); err != nil {
+			slog.Error("adblocker: DNS server shutdown error", "err", err)
+		}
+		// Clean up iptables rules so port 53 works normally after exit.
+		a.cmd.Run("iptables", "-t", "nat", "-D", "PREROUTING", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-port", "5354")
+		a.cmd.Run("iptables", "-t", "nat", "-D", "PREROUTING", "-p", "tcp", "--dport", "53", "-j", "REDIRECT", "--to-port", "5354")
+	}()
 
 	go func() {
+		slog.Info("adblocker: DNS listener starting", "addr", addrDNS, "upstream", upstreamDNS)
 		if err := a.dnsServer.ListenAndServe(); err != nil {
-			log.Fatalf("[AD_BLOCKER] Failed to start server: %s\n", err.Error())
+			// dns.Server.Shutdown() causes ListenAndServe to return an error.
+			// Only log if it wasn't an intentional shutdown.
+			if ctx.Err() == nil {
+				slog.Error("adblocker: DNS server crashed", "err", err)
+			}
 		}
 	}()
 

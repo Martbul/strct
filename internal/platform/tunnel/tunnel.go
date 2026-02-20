@@ -33,12 +33,7 @@ type processRunner interface {
 	Run(name string, args ...string) error
 }
 
-// ---------------------------------------------------------------------------
-// Config — tunnel's own config struct, not a raw *config.Config dependency.
-// This makes the service testable without building a full global config.
-// ---------------------------------------------------------------------------
 
-// Config holds everything the tunnel service needs to operate.
 type Config struct {
 	ServerIP   string
 	ServerPort int
@@ -48,9 +43,6 @@ type Config struct {
 	LocalPort  int
 }
 
-// ---------------------------------------------------------------------------
-// Service
-// ---------------------------------------------------------------------------
 
 // Service manages the frpc child process lifecycle.
 type Service struct {
@@ -80,9 +72,6 @@ func NewFromConfig(cfg *config.Config) *Service {
 	)
 }
 
-// Start implements agent.Service.
-// It writes the frpc config file, then runs frpc in a restart loop
-// that respects context cancellation.
 func (s *Service) Start(ctx context.Context) error {
 	projectRoot, err := os.Getwd()
 	if err != nil {
@@ -159,7 +148,6 @@ func (s *Service) runLoop(ctx context.Context, binary, cfgPath string) {
 	}
 }
 
-// writeConfig renders the frpc TOML config and writes it to disk.
 func (s *Service) writeConfig(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("tunnel: could not create config directory: %w", err)
@@ -167,7 +155,6 @@ func (s *Service) writeConfig(path string) error {
 
 	tmpl, err := template.New("frpc").Parse(frpConfigTmpl)
 	if err != nil {
-		// This is a programming error (bad template literal), not a runtime one.
 		panic(fmt.Sprintf("tunnel: frpc config template is invalid: %v", err))
 	}
 
@@ -194,9 +181,6 @@ func (s *Service) writeConfig(path string) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Template
-// ---------------------------------------------------------------------------
 
 type templateData struct {
 	ServerIP   string

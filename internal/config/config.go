@@ -1,4 +1,3 @@
-// ? config loading + device ID
 package config
 
 import (
@@ -9,6 +8,9 @@ import (
 
 	"github.com/joho/godotenv"
 )
+
+type BackendURL string
+type DataDir string
 
 type Config struct {
 	DeviceID           string
@@ -24,8 +26,6 @@ type Config struct {
 	IsDev              bool
 }
 
-// Load reads environment variables and returns a Config.
-// devMode is passed in from main so that flag parsing stays in main.
 func Load(devMode bool, defaultDomain, defaultVPSIP string) *Config {
 	if err := godotenv.Load(); err != nil {
 		slog.Debug("config: no .env file found, relying on system env vars")
@@ -58,7 +58,6 @@ func (c *Config) IsArm64() bool {
 	return runtime.GOOS == "linux" && runtime.GOARCH == "arm64" && !c.IsDev
 }
 
-// EffectiveBackendURL returns the configured URL or the default dev URL.
 func (c *Config) EffectiveBackendURL() string {
 	if c.BackendURL != "" {
 		return c.BackendURL
@@ -90,8 +89,10 @@ func getEnvAsInt(key string, fallback int) int {
 	return v
 }
 
-type BackendURL string
-type DataDir string
+func ProvideBackendURL(cfg *Config) BackendURL {
+	return BackendURL(cfg.EffectiveBackendURL())
+}
 
-func ProvideBackendURL(cfg *Config) BackendURL { return BackendURL(cfg.EffectiveBackendURL()) }
-func ProvideDataDir(cfg *Config) DataDir       { return DataDir(cfg.DataDir) }
+func ProvideDataDir(cfg *Config) DataDir {
+	return DataDir(cfg.DataDir)
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -42,46 +43,58 @@ func New(cfg Config) *VPN {
 	}
 }
 func NewFromConfig(cfg *config.Config) *VPN {
-    return New(Config{
-        DeviceID: cfg.DeviceID,
-        AuthKey:  cfg.TailScaleAuthToken,
-    })
+	return New(Config{
+		DeviceID: cfg.DeviceID,
+		AuthKey:  cfg.TailScaleAuthToken,
+	})
 }
 
 func (v *VPN) RegisterRoutes(mux *http.ServeMux) {
-    mux.HandleFunc("/api/vpn/status", v.HandleGetStatus)
-    mux.HandleFunc("/api/vpn/toggle", v.HandleToggleExitNode)
+	mux.HandleFunc("/api/vpn/status", v.HandleGetStatus)
+	mux.HandleFunc("/api/vpn/toggle", v.HandleToggleExitNode)
 }
 
 
-
-//! implement canceling loginc with ctx context.Context
 func (v *VPN) Start(ctx context.Context) error {
-	log.Printf("[VPN] Starting VPN Controller Service...")
+	slog.Info("vpn: starting")
 
-	// 1. Initial Check
+	// refreshStatus acquires v.mu internally — that's correct.
+	// But reading v.State AFTER refreshStatus returns is a race:
+	// the lock has been released and another goroutine could write State.
 	v.refreshStatus()
 
-	// 2. Auto-Provisioning
-	// If installed but not logged in, use the pre-configured AuthKey
-	if v.State.IsInstalled && (!v.State.IsRunning || v.State.Account == "") {
-		log.Println("[VPN-DEBUG] State detected as installed but not logged in. Triggering auto-provision.")
+	v.mu.RLock()
+	needsProvision := v.State.IsInstalled && (!v.State.IsRunning || v.State.Account == "")
+	slog.Info("vpn: initial state",
+		"installed", v.State.IsInstalled,
+		"running", v.State.IsRunning,
+		"account", v.State.Account,
+	)
+	v.mu.RUnlock()
+
+	if needsProvision {
+		slog.Info("vpn: not provisioned, triggering auto-provision")
 		go v.autoProvision()
-	} else {
-		log.Printf("[VPN-DEBUG] Start state: Installed=%v, Running=%v, Account=%s",
-			v.State.IsInstalled, v.State.IsRunning, v.State.Account)
 	}
 
-	// 3. Periodic refresh loop
-	ticker := time.NewTicker(15 * time.Second)
 	go func() {
-		for range ticker.C {
-			v.refreshStatus()
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				slog.Info("vpn: status refresh stopped")
+				return
+			case <-ticker.C:
+				v.refreshStatus()
+			}
 		}
 	}()
 
 	return nil
 }
+
 
 func (v *VPN) HandleGetStatus(w http.ResponseWriter, r *http.Request) {
 	v.mu.RLock()
@@ -114,7 +127,6 @@ func (v *VPN) HandleToggleExitNode(w http.ResponseWriter, r *http.Request) {
 
 	go v.setExitNode(req.Enable)
 }
-
 
 func (v *VPN) autoProvision() {
 	if v.Config.AuthKey == "" {

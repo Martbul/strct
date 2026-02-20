@@ -22,9 +22,6 @@ import (
 	"github.com/strct-org/strct-agent/internal/platform/wifi"
 )
 
-// These are overridden at build time via:
-//
-//	go build -ldflags "-X main.DefaultDomain=strct.org -X main.DefaultVPSIP=157.90.167.157"
 var (
 	DefaultDomain = "localhost"
 	DefaultVPSIP  = "127.0.0.1"
@@ -43,7 +40,6 @@ func main() {
 		"dataDir", cfg.DataDir,
 	)
 
-	// --- Construct features ---
 	cloudSvc, err := cloud.NewFromConfig(cfg)
 	if err != nil {
 		log.Fatalf("cloud init failed: %v", err)
@@ -55,7 +51,7 @@ func main() {
 	vpnSvc := vpn.NewFromConfig(cfg)
 	tunnelSvc := tunnel.NewFromConfig(cfg)
 
-	apiSvc := buildAPI(cfg, cloudSvc, monitorSvc, adblockSvc, routerSvc, vpnSvc)
+	apiSvc := registerRoutes(cfg, cloudSvc, monitorSvc, adblockSvc, routerSvc, vpnSvc)
 
 	a, err := agent.New(cfg, wifi.New(cfg.IsArm64()), []agent.Service{
 		cloudSvc,
@@ -78,8 +74,7 @@ func main() {
 	slog.Info("agent: shutdown complete")
 }
 
-// buildAPI assembles the HTTP mux. Each feature registers its own routes.
-func buildAPI(
+func registerRoutes(
 	cfg *config.Config,
 	c *cloud.Cloud,
 	m *monitor.NetworkMonitor,

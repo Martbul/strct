@@ -56,7 +56,6 @@ func (m *NetworkMonitor) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/network/speedtest", m.HandleSpeedtest)
 }
 
-// ! implement canceling loginc with ctx context.Context
 func (m *NetworkMonitor) Start(ctx context.Context) error {
 	log.Printf("[MONITOR] Starting Network Health Monitor (Target: %s, Interval: 30s)", m.Target)
 
@@ -65,10 +64,14 @@ func (m *NetworkMonitor) Start(ctx context.Context) error {
 
 	latencyTicker := time.NewTicker(120 * time.Second)
 	bandwidthTicker := time.NewTicker(2 * time.Hour)
+	defer latencyTicker.Stop()
+	defer bandwidthTicker.Stop()
 
 	go func() {
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case <-latencyTicker.C:
 				m.runPing()
 			case <-bandwidthTicker.C:

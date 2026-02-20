@@ -94,17 +94,19 @@ func (rc *RouterController) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/router/config", rc.HandleSetConfig)
 }
 
-// ! implement canceling loginc with ctx context.Context
 func (r *RouterController) Start(ctx context.Context) error {
 	log.Printf("[ROUTER] Starting Router Control Service")
 
 	go r.applySystemConfig()
 
 	deviceTicker := time.NewTicker(10 * time.Second)
+	defer deviceTicker.Stop()
 
 	go func() {
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case <-deviceTicker.C:
 				r.scanDevices()
 			}

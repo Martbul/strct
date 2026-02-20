@@ -24,21 +24,16 @@ const (
 	opHotspot      errs.Op = "agent.runSetupWizard"
 )
 
-// Service is anything the agent can lifecycle-manage.
 type Service interface {
 	Start(ctx context.Context) error
 }
 
-// Agent orchestrates service lifecycles.
-// It does not construct services and does not know about HTTP routes.
 type Agent struct {
 	cfg      *config.Config
 	wifi     wifi.Provider
 	services []Service
 }
 
-// New checks connectivity, then returns a ready Agent.
-// All services are injected by the caller (main).
 func New(cfg *config.Config, w wifi.Provider, services []Service) (*Agent, error) {
 	a := &Agent{cfg: cfg, wifi: w, services: services}
 	if err := a.ensureConnectivity(); err != nil {
@@ -47,8 +42,6 @@ func New(cfg *config.Config, w wifi.Provider, services []Service) (*Agent, error
 	return a, nil
 }
 
-// Start runs all services concurrently and blocks until ctx is cancelled
-// or all services exit.
 func (a *Agent) Start(ctx context.Context) {
 	var wg sync.WaitGroup
 	log.Println("--- Strct Agent Starting ---")
@@ -90,11 +83,6 @@ func (a *Agent) runSetupWizard() {
 	time.Sleep(2 * time.Second)
 }
 
-// ---------------------------------------------------------------------------
-// Built-in services (small enough to live in this package)
-// ---------------------------------------------------------------------------
-
-// ProfilerService exposes pprof on a dedicated port.
 type ProfilerService struct {
 	Port int
 }
@@ -112,8 +100,6 @@ func (p *ProfilerService) Start(ctx context.Context) error {
 	return nil
 }
 
-// HealthHandler reports agent-level status.
-// Registered by main alongside feature routes.
 func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	type response struct {
 		Status    string `json:"status"`

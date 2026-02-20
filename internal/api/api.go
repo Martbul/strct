@@ -14,26 +14,21 @@ import (
 
 const opStart errs.Op = "api.Server.Start"
 
-// Config holds the server configuration.
 type Config struct {
 	DataDir string
 	Port    int
 	IsDev   bool
 }
 
-// Server is a runnable HTTP server.
-// It accepts a pre-built mux so route registration stays in main.
 type Server struct {
 	cfg Config
 	mux *http.ServeMux
 }
 
-// New returns a Server ready to Start.
 func New(cfg Config, mux *http.ServeMux) *Server {
 	return &Server{cfg: cfg, mux: mux}
 }
 
-// Start implements agent.Service.
 func (s *Server) Start(ctx context.Context) error {
 	port := s.cfg.Port
 	if s.cfg.IsDev && port <= 1024 {

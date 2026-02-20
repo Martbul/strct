@@ -38,10 +38,6 @@ type Runner interface {
 	CombinedOutput(name string, args ...string) ([]byte, error)
 }
 
-// ---------------------------------------------------------------------------
-// Real implementation — used in production.
-// ---------------------------------------------------------------------------
-
 // Real executes commands via os/exec. This is the implementation injected
 // in all non-test code.
 type Real struct{}
@@ -57,10 +53,6 @@ func (Real) Output(name string, args ...string) ([]byte, error) {
 func (Real) CombinedOutput(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).CombinedOutput()
 }
-
-// ---------------------------------------------------------------------------
-// Mock implementation — used in tests.
-// ---------------------------------------------------------------------------
 
 // Call records a single command invocation for assertion in tests.
 type Call struct {
@@ -119,7 +111,7 @@ func (m *Mock) record(name string, args []string) MockResult {
 	if r, ok := m.responses[key]; ok {
 		return r
 	}
-	return MockResult{} // default: success, no output
+	return MockResult{} 
 }
 
 func (m *Mock) Run(name string, args ...string) error {
@@ -136,9 +128,6 @@ func (m *Mock) CombinedOutput(name string, args ...string) ([]byte, error) {
 	return r.Output, r.Err
 }
 
-// ---------------------------------------------------------------------------
-// Test assertion helpers (call these from *testing.T methods).
-// ---------------------------------------------------------------------------
 
 // WasCalled reports whether the given command string was ever called.
 // The command string is "name arg1 arg2 ..." — same format as Expect.
@@ -151,7 +140,6 @@ func (m *Mock) WasCalled(command string) bool {
 	return false
 }
 
-// AssertCalled fails the test if the given command was never run.
 func (m *Mock) AssertCalled(t interface {
 	Helper()
 	Errorf(string, ...any)
@@ -168,7 +156,6 @@ func (m *Mock) AssertCalled(t interface {
 	}
 }
 
-// AssertNotCalled fails the test if the given command was run.
 func (m *Mock) AssertNotCalled(t interface {
 	Helper()
 	Errorf(string, ...any)
@@ -179,8 +166,6 @@ func (m *Mock) AssertNotCalled(t interface {
 	}
 }
 
-// CallCount returns how many times a specific command was called.
-// Useful for asserting retry logic.
 func (m *Mock) CallCount(command string) int {
 	count := 0
 	for _, c := range m.Calls {
