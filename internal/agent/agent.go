@@ -128,8 +128,9 @@ type ProfilerService struct {
 }
 
 func (p *ProfilerService) Start(ctx context.Context) error {
-	srv := &http.Server{Addr: fmt.Sprintf("0.0.0.0:%d", p.Port)}
-	slog.Info("agent: pprof listening", "addr", srv.Addr)
+	addr := fmt.Sprintf("127.0.0.1:%d", p.Port) 
+	srv := &http.Server{Addr: addr}
+	slog.Info("agent: pprof listening (SSH tunnel required)", "addr", addr)
 	go func() {
 		<-ctx.Done()
 		srv.Close()

@@ -256,6 +256,58 @@ generate: ## Run go generate across all packages (Wire, mocks, etc.)
 	@printf "$(GREEN)✓ Generation complete$(RESET)\n"
 
 # -----------------------------------------------------------------------------
+# Profiling (pprof via SSH tunnel)
+# -----------------------------------------------------------------------------
+
+# Override these per-session: make pprof-vm DEVICE_VM=user@x.x.x.x
+DEVICE_VM  ?= martbul@192.168.100.19
+DEVICE_OPI ?= martbul@192.168.1.10
+PPROF_PORT ?= 6060
+
+.PHONY: pprof-kill
+pprof-kill: ## Kill any existing SSH tunnel holding PPROF_PORT
+	@printf "$(YELLOW)Freeing port $(PPROF_PORT)...$(RESET)\n"
+	@fuser -k $(PPROF_PORT)/tcp 2>/dev/null || lsof -ti:$(PPROF_PORT) | xargs kill -9 2>/dev/null || true
+	@printf "$(GREEN)✓ Port $(PPROF_PORT) is free$(RESET)\n"
+
+.PHONY: pprof-vm
+pprof-vm: pprof-kill ## Tunnel pprof from dev VM (192.168.100.19) → localhost:6060
+	@printf "$(CYAN)Tunnelling pprof from VM → localhost:$(PPROF_PORT)$(RESET)\n"
+	@printf "$(YELLOW)Open:  http://localhost:$(PPROF_PORT)/debug/pprof$(RESET)\n"
+	@printf "$(YELLOW)Ctrl+C to close the tunnel$(RESET)\n"
+	ssh -N -L $(PPROF_PORT):localhost:$(PPROF_PORT) $(DEVICE_VM)
+
+.PHONY: pprof-opi
+pprof-opi: pprof-kill ## Tunnel pprof from Orange Pi → localhost:6060
+	@printf "$(CYAN)Tunnelling pprof from Orange Pi → localhost:$(PPROF_PORT)$(RESET)\n"
+	@printf "$(YELLOW)Open:  http://localhost:$(PPROF_PORT)/debug/pprof$(RESET)\n"
+	@printf "$(YELLOW)Ctrl+C to close the tunnel$(RESET)\n"
+	ssh -N -L $(PPROF_PORT):localhost:$(PPROF_PORT) $(DEVICE_OPI)
+
+.PHONY: pprof-cpu
+pprof-cpu: ## Capture 30s CPU profile and open flame graph (tunnel must be open)
+	@printf "$(CYAN)Capturing 30s CPU profile...$(RESET)\n"
+	$(GO) tool pprof -http=:8081 \
+		"http://localhost:$(PPROF_PORT)/debug/pprof/profile?seconds=30"
+
+.PHONY: pprof-heap
+pprof-heap: ## Capture heap profile and open flame graph (tunnel must be open)
+	@printf "$(CYAN)Capturing heap profile...$(RESET)\n"
+	$(GO) tool pprof -http=:8081 \
+		"http://localhost:$(PPROF_PORT)/debug/pprof/heap"
+
+.PHONY: pprof-goroutines
+pprof-goroutines: ## Dump all goroutines — useful for finding leaks (tunnel must be open)
+	@printf "$(CYAN)Goroutine dump:$(RESET)\n"
+	curl -s "http://localhost:$(PPROF_PORT)/debug/pprof/goroutine?debug=2"
+
+.PHONY: pprof-allocs
+pprof-allocs: ## Show allocation profile (tunnel must be open)
+	@printf "$(CYAN)Capturing allocation profile...$(RESET)\n"
+	$(GO) tool pprof -http=:8081 \
+		"http://localhost:$(PPROF_PORT)/debug/pprof/allocs"
+
+# -----------------------------------------------------------------------------
 # Deploy / Install
 # -----------------------------------------------------------------------------
 
@@ -312,9 +364,15 @@ help: ## Print available targets and their descriptions
 	@printf "  $(CYAN)DEFAULT_VPS_IP$(RESET)   VPS server IP  (default: 127.0.0.1)\n"
 	@printf "  $(CYAN)DEVICE$(RESET)           SSH target for deploy (e.g. pi@192.168.1.10)\n"
 	@printf "  $(CYAN)PKG$(RESET)              Package path for test-pkg target\n"
+	@printf "  $(CYAN)DEVICE_VM$(RESET)        VM SSH target for pprof tunnel (default: martbul@192.168.100.19)\n"
+	@printf "  $(CYAN)DEVICE_OPI$(RESET)       Orange Pi SSH target for pprof tunnel\n"
+	@printf "  $(CYAN)PPROF_PORT$(RESET)       pprof port (default: 6060)\n"
 	@printf "\n$(BOLD)Examples:$(RESET)\n"
 	@printf "  make dev\n"
 	@printf "  make test\n"
 	@printf "  make test-pkg PKG=./internal/features/cloud\n"
 	@printf "  make build-arm64 DEFAULT_DOMAIN=strct.org DEFAULT_VPS_IP=1.2.3.4\n"
 	@printf "  make install DEVICE=pi@192.168.1.10\n"
+	@printf "  make pprof-vm                           # tunnel from VM, open browser manually\n"
+	@printf "  make pprof-cpu                          # flame graph after tunnel is open\n"
+	@printf "  make pprof-vm DEVICE_VM=pi@10.0.0.5    # override VM address\n"

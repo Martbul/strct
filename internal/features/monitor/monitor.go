@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -26,6 +26,7 @@ type NetworkMonitor struct {
 	stats  MonitorStats
 	mu     sync.RWMutex
 	Target string
+	client *http.Client
 }
 
 type MonitorStats struct {
@@ -40,6 +41,13 @@ func New(cfg MonitorConfig) *NetworkMonitor {
 	return &NetworkMonitor{
 		Target: "8.8.8.8",
 		Config: cfg,
+		client: &http.Client{
+			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConnsPerHost: 2,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
 	}
 }
 
@@ -52,23 +60,27 @@ func NewFromConfig(cfg *config.Config) *NetworkMonitor {
 }
 
 func (m *NetworkMonitor) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/api/network/stats", m.HandleStats)
-	mux.HandleFunc("/api/network/speedtest", m.HandleSpeedtest)
+	mux.HandleFunc("GET /api/network/stats", m.HandleStats)
+	mux.HandleFunc("POST /api/network/speedtest", m.HandleSpeedtest)
 }
 
 func (m *NetworkMonitor) Start(ctx context.Context) error {
-	log.Printf("[MONITOR] Starting Network Health Monitor (Target: %s, Interval: 30s)", m.Target)
+	slog.Info("monitor: starting", "target", m.Target)
 
+	// Run immediately on start, then on schedule
 	m.runPing()
 	m.runBandwidth()
 
-	latencyTicker := time.NewTicker(120 * time.Second)
-	bandwidthTicker := time.NewTicker(2 * time.Hour)
-
 	go func() {
+		latencyTicker := time.NewTicker(120 * time.Second)
+		bandwidthTicker := time.NewTicker(2 * time.Hour)
+		defer latencyTicker.Stop()
+		defer bandwidthTicker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
+				slog.Info("monitor: stopped")
 				return
 			case <-latencyTicker.C:
 				m.runPing()
@@ -90,7 +102,7 @@ func (m *NetworkMonitor) HandleStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *NetworkMonitor) HandleSpeedtest(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[HandleSpeedtest] Triggered via API")
+	slog.Info("monitor: Triggered via API")
 
 	go func() {
 		m.runPing()
@@ -103,11 +115,11 @@ func (m *NetworkMonitor) HandleSpeedtest(w http.ResponseWriter, r *http.Request)
 }
 
 func (m *NetworkMonitor) runPing() {
-	log.Printf("[runPing]")
+	slog.Info("runPing")
 
 	stats, err := m.pingTarget()
 	if err != nil {
-		log.Printf("[MONITOR] Ping Execution Failed: %v", err)
+		slog.Error("monitor: ping failed", "err", err)
 		return
 	}
 
@@ -122,11 +134,12 @@ func (m *NetworkMonitor) runPing() {
 }
 
 func (m *NetworkMonitor) runBandwidth() {
-	log.Printf("[runBandwidth]")
+	slog.Info("runBandwidth")
 
 	stats, err := m.getBandwidth()
 	if err != nil {
-		log.Printf("[MONITOR] Bandwidth Test Failed: %v", err)
+		slog.Error("monitor: bandwidth failed", "err", err)
+
 		return
 	}
 
@@ -135,6 +148,7 @@ func (m *NetworkMonitor) runBandwidth() {
 	m.mu.Unlock()
 
 	go m.reportToBackend(*stats)
+
 }
 
 func (m *NetworkMonitor) reportToBackend(stats MonitorStats) {
@@ -142,14 +156,15 @@ func (m *NetworkMonitor) reportToBackend(stats MonitorStats) {
 
 	payload, err := json.Marshal(stats)
 	if err != nil {
+		slog.Error("monitor: failed to marshal stats", "err", err)
 		return
 	}
 
 	url := fmt.Sprintf("%s/api/v1/device/agent/%s/network_metrics", m.Config.BackendURL, m.Config.DeviceID)
 
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(payload))
 	if err != nil {
-		log.Printf("[MONITOR] Failed to create request: %v", err)
+		slog.Error("monitor: failed to build request", "url", url, "err", err)
 		return
 	}
 
@@ -157,16 +172,18 @@ func (m *NetworkMonitor) reportToBackend(stats MonitorStats) {
 	// req.Header.Set("Authorization", "Bearer "+m.Config.AuthToken) //! the auth token is for the frp tunnel, not the API auth middleware
 	//! maybe auth the users into the device to have access to the token
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := m.client.Do(req)
 	if err != nil {
-		log.Printf("[MONITOR] Upload failed: %v", err)
+		slog.Error("monitor: report upload failed", "err", err)
 		return
 	}
 	defer resp.Body.Close()
+	// Drain body so the connection is returned to the pool immediately.
+	// Without this, the transport holds the connection open until GC.
+	io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode >= 400 {
-		log.Printf("[MONITOR] API Rejected Data: Status %d", resp.StatusCode)
+		slog.Warn("monitor: backend rejected report", "status", resp.StatusCode)
 	}
 }
 
