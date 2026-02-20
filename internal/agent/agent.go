@@ -97,7 +97,6 @@ func waitForInternet(timeout, interval time.Duration) error {
 
 func (a *Agent) runSetupWizard() {
 	if err := a.wifi.StartHotspot(); err != nil {
-		// Non-fatal: log and continue
 		slog.Error("agent: hotspot start failed",
 			"err", errs.E(opHotspot, errs.KindSystem, err),
 		)

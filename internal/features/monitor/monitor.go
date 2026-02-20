@@ -22,11 +22,12 @@ type MonitorConfig struct {
 }
 
 type NetworkMonitor struct {
-	Config MonitorConfig
-	stats  MonitorStats
-	mu     sync.RWMutex
-	Target string
-	client *http.Client
+	Config          MonitorConfig
+	stats           MonitorStats
+	mu              sync.RWMutex
+	Target          string
+	client          *http.Client
+	bandwidthClient *http.Client
 }
 
 type MonitorStats struct {
@@ -46,6 +47,13 @@ func New(cfg MonitorConfig) *NetworkMonitor {
 			Transport: &http.Transport{
 				MaxIdleConnsPerHost: 2,
 				IdleConnTimeout:     90 * time.Second,
+			},
+		},
+		bandwidthClient: &http.Client{
+			Timeout: 90 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConnsPerHost: 1,
+				IdleConnTimeout:     30 * time.Second,
 			},
 		},
 	}
@@ -216,35 +224,54 @@ func (m *NetworkMonitor) pingTarget() (*MonitorStats, error) {
 	}, nil
 }
 
+// func (m *NetworkMonitor) getBandwidth() (*MonitorStats, error) {
+// 	testURL := "http://speedtest.tele2.net/10MB.zip"
+
+// 	start := time.Now()
+
+// 	client := http.Client{
+// 		Timeout: 50 * time.Second,
+// 	}
+
+// 	resp, err := client.Get(testURL)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("download start failed: %w", err)
+// 	}
+// 	defer resp.Body.Close()
+
+// 	written, err := io.Copy(io.Discard, resp.Body)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("download interrupted: %w", err)
+// 	}
+
+// 	duration := time.Since(start)
+
+// 	bits := float64(written) * 8
+// 	mbpsVal := (bits / 1_000_000) / duration.Seconds()
+
+// 	return &MonitorStats{
+// 		Latency:   nil,
+// 		Loss:      nil,
+// 		IsDown:    nil,
+// 		Bandwidth: &mbpsVal,
+// 	}, nil
+// }
+
 func (m *NetworkMonitor) getBandwidth() (*MonitorStats, error) {
-	testURL := "http://speedtest.tele2.net/10MB.zip"
-
-	start := time.Now()
-
-	client := http.Client{
-		Timeout: 50 * time.Second,
-	}
-
-	resp, err := client.Get(testURL)
+	// Uses m.bandwidthClient — 90s timeout vs the 10s on m.client.
+	// A fresh http.Client here would bypass the pool on every test.
+	resp, err := m.bandwidthClient.Get("http://speedtest.tele2.net/10MB.zip")
 	if err != nil {
-		return nil, fmt.Errorf("download start failed: %w", err)
+		return nil, fmt.Errorf("monitor: bandwidth download failed: %w", err)
 	}
 	defer resp.Body.Close()
 
+	start := time.Now()
 	written, err := io.Copy(io.Discard, resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("download interrupted: %w", err)
+		return nil, fmt.Errorf("monitor: bandwidth download interrupted: %w", err)
 	}
 
-	duration := time.Since(start)
-
-	bits := float64(written) * 8
-	mbpsVal := (bits / 1_000_000) / duration.Seconds()
-
-	return &MonitorStats{
-		Latency:   nil,
-		Loss:      nil,
-		IsDown:    nil,
-		Bandwidth: &mbpsVal,
-	}, nil
+	mbps := (float64(written) * 8 / 1_000_000) / time.Since(start).Seconds()
+	return &MonitorStats{Bandwidth: &mbps}, nil
 }

@@ -59,6 +59,7 @@ type RouterController struct {
 	Devices     []ConnectedDevice
 	mu          sync.RWMutex
 	blockedMACs map[string]bool
+	client      *http.Client
 }
 
 func New(cfg Config) *RouterController {
@@ -78,6 +79,13 @@ func New(cfg Config) *RouterController {
 		State:       initialState,
 		Devices:     []ConnectedDevice{},
 		blockedMACs: make(map[string]bool),
+		client: &http.Client{
+			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConnsPerHost: 2,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
 	}
 }
 func NewFromConfig(cfg *config.Config) *RouterController {
@@ -309,8 +317,7 @@ func (rc *RouterController) reportDevicesToBackend(devices []ConnectedDevice) {
 	req.Header.Set("Content-Type", "application/json")
 
 	//!TODO: Use one http.Client into the RouterController struct instead of creating a new one for each request
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := rc.client.Do(req)
 	if err != nil {
 		slog.Error("router: failed to report devices to backend", "err", err)
 		return
