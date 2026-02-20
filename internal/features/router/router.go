@@ -201,6 +201,8 @@ func (rc *RouterController) applySystemConfig() {
 		nameserver = "1.1.1.1"
 	}
 
+
+	//!TODO: Use executil inkection of the exec.command
 	// Write /etc/resolv.conf
 	dnsContent := fmt.Sprintf("nameserver %s\n", nameserver)
 	os.WriteFile("/etc/resolv.conf", []byte(dnsContent), 0644)

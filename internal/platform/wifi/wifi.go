@@ -3,6 +3,8 @@ package wifi
 import (
 	"net/http"
 	"time"
+
+	"github.com/strct-org/strct-agent/internal/platform/executil"
 )
 
 type Network struct {
@@ -11,7 +13,7 @@ type Network struct {
 	Signal   int
 }
 
-// Provider is the interface both RealWiFi and MockWiFi satisfy.
+//  RealWiFi and MockWiFi satisfy
 type Provider interface {
 	Scan() ([]Network, error)
 	Connect(ssid, password string) error
@@ -25,10 +27,9 @@ func HasInternet() bool {
 	return err == nil
 }
 
-// New returns the appropriate Provider based on whether we are on real ARM64 hardware.
 func New(isArm64 bool) Provider {
 	if isArm64 {
-		return &RealWiFi{Interface: "wlan0"}
+		return NewRealWiFi("wlan0", executil.Real{})
 	}
 	return &MockWiFi{}
 }

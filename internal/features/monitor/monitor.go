@@ -64,8 +64,6 @@ func (m *NetworkMonitor) Start(ctx context.Context) error {
 
 	latencyTicker := time.NewTicker(120 * time.Second)
 	bandwidthTicker := time.NewTicker(2 * time.Hour)
-	defer latencyTicker.Stop()
-	defer bandwidthTicker.Stop()
 
 	go func() {
 		for {

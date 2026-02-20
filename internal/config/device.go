@@ -1,7 +1,7 @@
 package config
 
 import (
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,19 +24,22 @@ func getOrGenerateDeviceID(isDev bool) string {
 	}
 
 	newID := "device-" + uuid.New().String()
-	log.Printf("[INIT] New Device ID generated: %s", newID)
+	slog.Info("init: New Device ID generated:", newID)
 
 	dir := filepath.Dir(filePath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		log.Printf("[WARN] Could not create directory %s: %v", dir, err)
-		return newID 
+		slog.Warn("init: Could not create directory:", dir, "error", err)
+
+		return newID
 	}
 
 	err = os.WriteFile(filePath, []byte(newID), 0644)
 	if err != nil {
-		log.Printf("[WARN] Could not save device ID to disk at %s: %v", filePath, err)
+		slog.Warn("init:  Could not save device ID to disk at:", filePath, "error", err)
+
 	} else {
-		log.Printf("[INIT] Device ID saved to %s", filePath)
+		slog.Info("init: Device ID saved to:", filePath)
+
 	}
 
 	return newID
