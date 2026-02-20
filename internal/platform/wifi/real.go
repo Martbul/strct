@@ -83,11 +83,11 @@
 
 // 	log.Println("[WIFI] Adding Hotspot connection...")
 // // 3. ADD: Create the connection
-// 	if err := exec.Command("nmcli", "con", "add", 
-// 		"type", "wifi", 
-// 		"ifname", w.Interface, 
-// 		"con-name", "Hotspot", 
-// 		"autoconnect", "yes", 
+// 	if err := exec.Command("nmcli", "con", "add",
+// 		"type", "wifi",
+// 		"ifname", w.Interface,
+// 		"con-name", "Hotspot",
+// 		"autoconnect", "yes",
 // 		"ssid", ssid).Run(); err != nil {
 // 		return fmt.Errorf("failed to add connection: %v", err)
 // 	}
@@ -110,7 +110,7 @@
 // 	}
 
 // 	fmt.Println("[WIFI] Bringing up Hotspot...")
-	
+
 // 	// 5. UP: This automatically handles the disconnect of client mode
 // 	output, err := exec.Command("nmcli", "con", "up", "Hotspot").CombinedOutput()
 // 	if err != nil {
@@ -127,7 +127,6 @@
 // 	return exec.Command("nmcli", "con", "down", "Hotspot").Run()
 // }
 
-
 package wifi
 
 import (
@@ -136,7 +135,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
 )
 
 // ---------------------------------------------------------------------------

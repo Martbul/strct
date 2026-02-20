@@ -19,7 +19,7 @@ package e2e_test
 // 	"time"
 // )
 
-// const agentPort = 18080 
+// const agentPort = 18080
 
 // // TestAgentHealthEndpoint builds the agent, starts it in dev mode,
 // // hits the health endpoint, and verifies the response shape.

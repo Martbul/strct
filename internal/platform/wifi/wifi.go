@@ -13,7 +13,7 @@ type Network struct {
 	Signal   int
 }
 
-//  RealWiFi and MockWiFi satisfy
+// RealWiFi and MockWiFi satisfy
 type Provider interface {
 	Scan() ([]Network, error)
 	Connect(ssid, password string) error

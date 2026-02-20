@@ -111,7 +111,7 @@ func (m *Mock) record(name string, args []string) MockResult {
 	if r, ok := m.responses[key]; ok {
 		return r
 	}
-	return MockResult{} 
+	return MockResult{}
 }
 
 func (m *Mock) Run(name string, args ...string) error {
@@ -127,7 +127,6 @@ func (m *Mock) CombinedOutput(name string, args ...string) ([]byte, error) {
 	r := m.record(name, args)
 	return r.Output, r.Err
 }
-
 
 // WasCalled reports whether the given command string was ever called.
 // The command string is "name arg1 arg2 ..." — same format as Expect.

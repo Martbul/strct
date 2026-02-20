@@ -33,7 +33,6 @@ func New(devMode bool) Manager {
 			path = "/dev/sda"
 		}
 
-
 		slog.Info("disk: Factory: Returning REAL Disk Manager", "path", path)
 		return &RealDisk{
 			DevicePath: path,
@@ -88,9 +87,8 @@ func detectDevicePath() (string, error) {
 
 	var noExternalDriveError = errors.New("no suitable external drive found")
 
-	return "", noExternalDriveError 
+	return "", noExternalDriveError
 }
-
 
 func GetDirSize(path string) (uint64, error) {
 	var size int64

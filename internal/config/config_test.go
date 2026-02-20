@@ -101,7 +101,6 @@ func TestIsArm64_DevModeAlwaysFalse(t *testing.T) {
 	}
 }
 
-
 func TestGetOrGenerateDeviceID_PersistsAcrossCalls(t *testing.T) {
 	// Use a temp dir so we don't pollute the repo root.
 	tmp := t.TempDir()
@@ -109,10 +108,10 @@ func TestGetOrGenerateDeviceID_PersistsAcrossCalls(t *testing.T) {
 
 	// We can't call getOrGenerateDeviceID with a custom path directly
 	// because it constructs the path internally based on isDev.
-//! This is a design smell — the path should be injected.
+	//! This is a design smell — the path should be injected.
 	// For now, test the observable behavior via Load in dev mode
 	// (which writes to ./device-id.lock in the working directory).
-	// 
+	//
 	// Better: refactor getOrGenerateDeviceID to accept the path as a param,
 	// then this test becomes straightforward.
 	//
@@ -127,7 +126,6 @@ func TestGetOrGenerateDeviceID_PersistsAcrossCalls(t *testing.T) {
 		t.Error("device ID should not be empty")
 	}
 }
-
 
 func generateDeviceIDToFile(filePath string) string {
 	content, err := os.ReadFile(filePath)

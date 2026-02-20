@@ -52,7 +52,6 @@ func (v *VPN) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/vpn/toggle", v.HandleToggleExitNode)
 }
 
-
 func (v *VPN) Start(ctx context.Context) error {
 	slog.Info("vpn: starting")
 
@@ -92,7 +91,6 @@ func (v *VPN) Start(ctx context.Context) error {
 
 	return nil
 }
-
 
 func (v *VPN) HandleGetStatus(w http.ResponseWriter, r *http.Request) {
 	v.mu.RLock()
@@ -192,7 +190,7 @@ func (v *VPN) setExitNode(enable bool) {
 		slog.Error("vpn: Failed to toggle Exit Node", "err", err)
 		slog.Error("vpn: Failed to toggle Exit Node, command output", "output", string(output))
 	} else {
-		slog.Info("vpn: Exit Node toggle success, command output", "output", string(output)	)
+		slog.Info("vpn: Exit Node toggle success, command output", "output", string(output))
 	}
 
 	// Trigger immediate status refresh

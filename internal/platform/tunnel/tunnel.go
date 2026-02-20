@@ -33,7 +33,6 @@ type processRunner interface {
 	Run(name string, args ...string) error
 }
 
-
 type Config struct {
 	ServerIP   string
 	ServerPort int
@@ -42,7 +41,6 @@ type Config struct {
 	DataDir    string
 	LocalPort  int
 }
-
 
 // Service manages the frpc child process lifecycle.
 type Service struct {
@@ -180,7 +178,6 @@ func (s *Service) writeConfig(path string) error {
 	)
 	return nil
 }
-
 
 type templateData struct {
 	ServerIP   string

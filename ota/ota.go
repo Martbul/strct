@@ -16,7 +16,7 @@ import (
 
 type Config struct {
 	CurrentVersion string
-	StorageURL     string 
+	StorageURL     string
 }
 
 func StartUpdater(cfg Config) {

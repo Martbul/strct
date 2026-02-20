@@ -1,6 +1,5 @@
 package setup
 
-
 const HtmlPage = `
 <!DOCTYPE html>
 <html lang="en">

@@ -9,7 +9,7 @@ func Init(isDev bool) {
 	var handler slog.Handler
 
 	opts := &slog.HandlerOptions{
-		Level: slog.LevelDebug, 
+		Level:     slog.LevelDebug,
 		AddSource: true,
 	}
 
