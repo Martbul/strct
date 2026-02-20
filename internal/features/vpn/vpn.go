@@ -132,7 +132,6 @@ func (v *VPN) autoProvision() {
 	v.State.ErrorMessage = "Provisioning device..."
 	v.mu.Unlock()
 
-
 	slog.Info("vpn: enabling IP forwarding")
 	if out, err := exec.Command("sysctl", "-w", "net.ipv4.ip_forward=1").CombinedOutput(); err != nil {
 		slog.Info("vpn: Attempting to set ipv6 forward as well", "out", string(out))
