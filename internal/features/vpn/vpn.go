@@ -345,7 +345,13 @@ func New(cfg config.Config, cmd executil.Runner, wifiSvc wifiStatusReader) *VPN 
 }
 
 func NewFromConfig(cfg *config.Config, wifiSvc wifiStatusReader) *VPN {
-	return New(*cfg, executil.Real{}, wifiSvc)
+    var cmd executil.Runner
+    if cfg.IsDev {
+        cmd = executil.NewDevRunner()
+    } else {
+        cmd = executil.Real{}
+    }
+    return New(*cfg, cmd, wifiSvc)
 }
 
 func (s *VPN) RegisterRoutes(mux *http.ServeMux) {

@@ -114,7 +114,13 @@ func New(cfg config.Config, cmd executil.Runner) *WiFi {
 }
 
 func NewFromConfig(cfg *config.Config) *WiFi {
-	return New(*cfg, executil.Real{})
+    var cmd executil.Runner
+    if cfg.IsDev {
+        cmd = executil.NewDevRunner()
+    } else {
+        cmd = executil.Real{}
+    }
+    return New(*cfg, cmd)
 }
 
 // Status returns a snapshot of the current WiFi state.

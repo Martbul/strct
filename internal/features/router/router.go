@@ -23,6 +23,7 @@ import (
 type Config struct {
 	DeviceID   string
 	BackendURL string
+	DevMode    bool
 }
 
 type PortRule struct {
@@ -99,6 +100,7 @@ rsn_pairwise=CCMP
 ignore_broadcast_ssid={{if .IsHidden}}1{{else}}0{{end}}
 max_num_sta={{.MaxClients}}
 `
+
 func New(cfg Config, cmd executil.Runner) *RouterController {
 	return &RouterController{
 		cfg: cfg,
@@ -136,10 +138,17 @@ func NewDefault(cfg Config) *RouterController {
 }
 
 func NewFromConfig(cfg *config.Config) *RouterController {
-	return NewDefault(Config{
+	var cmd executil.Runner
+	if cfg.IsDev {
+		cmd = executil.NewDevRunner()
+	} else {
+		cmd = executil.Real{}
+	}
+	return New(Config{
 		DeviceID:   cfg.DeviceID,
 		BackendURL: cfg.EffectiveBackendURL(),
-	})
+		DevMode:    cfg.IsDev,
+	}, cmd)
 }
 
 func (rc *RouterController) RegisterRoutes(mux *http.ServeMux) {
@@ -354,7 +363,12 @@ func (rc *RouterController) applyHostapd() error {
 		return fmt.Errorf("template execute: %w", err)
 	}
 
-	if err := os.WriteFile("/etc/hostapd/hostapd.conf", buf.Bytes(), 0600); err != nil {
+	path := "/etc/hostapd/hostapd.conf"
+	if rc.cfg.DevMode { // add DevMode bool to router.Config
+		path = os.TempDir() + "/hostapd.conf"
+	}
+
+	if err := os.WriteFile(path, buf.Bytes(), 0600); err != nil {
 		return fmt.Errorf("write hostapd.conf: %w", err)
 	}
 
@@ -401,7 +415,12 @@ func (rc *RouterController) applyDNS() error {
 	}
 
 	content := fmt.Sprintf("nameserver %s\nnameserver %s\n", entry.primary, entry.secondary)
-	if err := os.WriteFile("/etc/resolv.conf", []byte(content), 0644); err != nil {
+
+	resolvPath := "/etc/resolv.conf"
+	if rc.cfg.DevMode {
+		resolvPath = os.TempDir() + "/resolv.conf"
+	}
+	if err := os.WriteFile(resolvPath, []byte(content), 0644); err != nil {
 		return fmt.Errorf("write resolv.conf: %w", err)
 	}
 

@@ -396,7 +396,13 @@ func New(cfg config.Config, cmd executil.Runner) *AdBlock {
 }
 
 func NewFromConfig(cfg *config.Config) *AdBlock {
-	return New(*cfg, executil.Real{})
+    var cmd executil.Runner
+    if cfg.IsDev {
+        cmd = executil.NewDevRunner()
+    } else {
+        cmd = executil.Real{}
+    }
+    return New(*cfg, cmd)
 }
 
 func (s *AdBlock) RegisterRoutes(mux *http.ServeMux) {
