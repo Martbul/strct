@@ -69,6 +69,7 @@ func getEnv(key, fallback string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
 	}
+	slog.Warn("config: using default .env var", "var", key, "default", fallback)
 	return fallback
 }
 
