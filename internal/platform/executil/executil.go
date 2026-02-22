@@ -42,6 +42,10 @@ type Runner interface {
 // in all non-test code.
 type Real struct{}
 
+func NewRealRunner() Runner {
+	return &Real{}
+}
+
 func (Real) Run(name string, args ...string) error {
 	return exec.Command(name, args...).Run()
 }

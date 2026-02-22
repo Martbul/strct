@@ -5,13 +5,6 @@
 //   - DHCP + DNS via dnsmasq
 //   - NAT/IP forwarding via iptables
 //   - Extender mode via ap+sta concurrent radio
-//
-// NOT in this package:
-//   - VPN (see internal/features/vpn)
-//   - Ad blocking (see internal/features/adblock)
-//
-// Both vpn and adblock read wifi.Status to know which subnet/interface
-// is active, and apply themselves on top independently.
 package wifi
 
 import (
@@ -29,8 +22,6 @@ import (
 	"github.com/strct-org/strct-agent/internal/platform/executil"
 )
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 type Mode string
 
 const (
@@ -39,23 +30,12 @@ const (
 	ModeExtender Mode = "extender" // wlan0 client → wlan0_ap virtual AP
 )
 
-type RouterConfig struct {
-	SSID       string `json:"ssid"`
-	Password   string `json:"password"`
-	Band       string `json:"band"`        // "2.4GHz" | "5GHz"
-	Channel    int    `json:"channel"`     // 1/6/11 for 2.4GHz; 36/40/44/48 for 5GHz
-	MaxClients int    `json:"max_clients"` // hostapd: max_num_sta
-	SubnetBase string `json:"subnet_base"` // e.g. "192.168.100" → gateway .1, DHCP .50-.150
-	DNSProvider string `json:"dns_provider"` // cloudflare|google|adguard|quad9
-}
-
-type ExtenderConfig struct {
-	UpstreamSSID     string `json:"upstream_ssid"`
-	UpstreamPassword string `json:"upstream_password"`
-	ExtenderSSID     string `json:"extender_ssid"`
-	ExtenderPassword string `json:"extender_password"`
-	ExtenderBand     string `json:"extender_band"` // must match upstream band
-	UseSecondRadio   bool   `json:"use_second_radio"` // use wlan1 instead of virtual wlan0_ap
+type WiFi struct {
+	cfg    config.Config
+	state  WiFiConfig
+	status Status
+	mu     sync.RWMutex
+	cmd    executil.Runner
 }
 
 type WiFiConfig struct {
@@ -64,28 +44,40 @@ type WiFiConfig struct {
 	Extender ExtenderConfig `json:"extender"`
 }
 
+type RouterConfig struct {
+	SSID        string `json:"ssid"`
+	Password    string `json:"password"`
+	Band        string `json:"band"`         // "2.4GHz" | "5GHz"
+	SubnetBase  string `json:"subnet_base"`  // e.g. "192.168.100" → gateway .1, DHCP .50-.150
+	DNSProvider string `json:"dns_provider"` // cloudflare|google|adguard|quad9
+	MaxClients  int    `json:"max_clients"`  // hostapd: max_num_sta
+	Channel     int    `json:"channel"`      // 1/6/11 for 2.4GHz; 36/40/44/48 for 5GHz
+}
+
+type ExtenderConfig struct {
+	UpstreamSSID     string `json:"upstream_ssid"`
+	UpstreamPassword string `json:"upstream_password"`
+	ExtenderSSID     string `json:"extender_ssid"`
+	ExtenderPassword string `json:"extender_password"`
+	ExtenderBand     string `json:"extender_band"`    // must match upstream band
+	UseSecondRadio   bool   `json:"use_second_radio"` // use wlan1 instead of virtual wlan0_ap
+}
+
 // Status is the shared read-only view that sibling packages (vpn, adblock)
 // use to know what's currently active. Get it via Service.Status().
 type Status struct {
 	Mode         Mode   `json:"mode"`
-	Active       bool   `json:"active"`
 	SSID         string `json:"ssid,omitempty"`
-	APInterface  string `json:"ap_interface,omitempty"`  // "wlan0" or "wlan0_ap" or "wlan1"
-	SubnetBase   string `json:"subnet_base,omitempty"`   // e.g. "192.168.100"
-	GatewayIP    string `json:"gateway_ip,omitempty"`    // e.g. "192.168.100.1"
-	ConnectedIPs int    `json:"connected_ips"`
+	APInterface  string `json:"ap_interface,omitempty"` // "wlan0" or "wlan0_ap" or "wlan1"
+	SubnetBase   string `json:"subnet_base,omitempty"`  // e.g. "192.168.100"
+	GatewayIP    string `json:"gateway_ip,omitempty"`   // e.g. "192.168.100.1"
 	UpstreamSSID string `json:"upstream_ssid,omitempty"` // extender mode only
 	Error        string `json:"error,omitempty"`
+	ConnectedIPs int    `json:"connected_ips"`
+	Active       bool   `json:"active"`
 }
 
 
-type WiFi struct {
-	cfg    config.Config
-	state  WiFiConfig
-	status Status
-	mu     sync.RWMutex
-	cmd    executil.Runner
-}
 
 func New(cfg config.Config, cmd executil.Runner) *WiFi {
 	return &WiFi{
@@ -113,16 +105,16 @@ func New(cfg config.Config, cmd executil.Runner) *WiFi {
 }
 
 func NewFromConfig(cfg *config.Config) *WiFi {
-    var cmd executil.Runner
-    if cfg.IsDev {
-        cmd = executil.NewDevRunner()
-    } else {
-        cmd = executil.Real{}
-    }
-    return New(*cfg, cmd)
+	var cmd executil.Runner
+	if cfg.IsDev {
+		cmd = executil.NewDevRunner()
+	} else {
+		cmd = executil.NewRealRunner()
+	}
+	return New(*cfg, cmd)
 }
 
-// Status returns a snapshot of the current WiFi state.
+// Status returns a snapshot of the current WiFi state
 // Called by vpn.Service and adblock.Service to know what subnet/interface is active.
 func (s *WiFi) Status() Status {
 	s.mu.RLock()
@@ -131,11 +123,11 @@ func (s *WiFi) Status() Status {
 }
 
 func (s *WiFi) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/wifi/config",  s.handleGetConfig)
+	mux.HandleFunc("GET /api/wifi/config", s.handleGetConfig)
 	mux.HandleFunc("POST /api/wifi/config", s.handleSetConfig)
-	mux.HandleFunc("GET /api/wifi/status",  s.handleGetStatus)
-	mux.HandleFunc("GET /api/wifi/scan",    s.handleScanNetworks)
-	mux.HandleFunc("POST /api/wifi/stop",   s.handleStop)
+	mux.HandleFunc("GET /api/wifi/status", s.handleGetStatus)
+	mux.HandleFunc("GET /api/wifi/scan", s.handleScanNetworks)
+	mux.HandleFunc("POST /api/wifi/stop", s.handleStop)
 }
 
 func (s *WiFi) Start(ctx context.Context) error {
@@ -157,8 +149,6 @@ func (s *WiFi) Start(ctx context.Context) error {
 
 	return nil
 }
-
-// ─── HTTP handlers ────────────────────────────────────────────────────────────
 
 func (s *WiFi) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
@@ -222,8 +212,6 @@ func (s *WiFi) handleStop(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// ─── Mode application ─────────────────────────────────────────────────────────
-
 func (s *WiFi) apply() error {
 	s.mu.RLock()
 	mode := s.state.Mode
@@ -261,7 +249,7 @@ func (s *WiFi) applyRouter() error {
 
 	slog.Info("wifi: applying router mode", "ssid", cfg.SSID, "band", cfg.Band)
 
-	if err := s.writeHostapdConf(cfg, "wlan0"); err != nil {
+	if err := s.writeHostapdConf(cfg, "wlan0", "/etc/hostapd/hostapd.conf"); err != nil {
 		return fmt.Errorf("hostapd config: %w", err)
 	}
 	if err := s.cmd.Run("systemctl", "restart", "hostapd"); err != nil {
@@ -283,9 +271,9 @@ func (s *WiFi) applyRouter() error {
 	}
 
 	// NAT: share eth0 internet with wlan0 devices
-	os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0644)        //nolint:errcheck
-	s.cmd.Run("iptables", "-t", "nat", "-F")                                 //nolint:errcheck
-	s.cmd.Run("iptables", "-F", "FORWARD")                                   //nolint:errcheck
+	os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0644) //nolint:errcheck
+	s.cmd.Run("iptables", "-t", "nat", "-F")                         //nolint:errcheck
+	s.cmd.Run("iptables", "-F", "FORWARD")                           //nolint:errcheck
 	if err := s.cmd.Run("iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "eth0", "-j", "MASQUERADE"); err != nil {
 		return fmt.Errorf("iptables NAT: %w", err)
 	}
@@ -351,7 +339,7 @@ func (s *WiFi) applyExtender() error {
 		MaxClients: 20,
 		SubnetBase: "192.168.200",
 	}
-	if err := s.writeHostapdConf(extCfg, apInterface); err != nil {
+	if err := s.writeHostapdConf(extCfg, apInterface, "/etc/hostapd/hostapd.conf"); err != nil {
 		return fmt.Errorf("hostapd config: %w", err)
 	}
 	if err := s.cmd.Run("systemctl", "restart", "hostapd"); err != nil {
@@ -369,7 +357,7 @@ func (s *WiFi) applyExtender() error {
 	s.cmd.Run("systemctl", "restart", "dnsmasq") //nolint:errcheck
 
 	os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0644)                                                                          //nolint:errcheck
-	s.cmd.Run("iptables", "-t", "nat", "-F")                                                                                                   //nolint:errcheck
+	s.cmd.Run("iptables", "-t", "nat", "-F")                                                                                                  //nolint:errcheck
 	s.cmd.Run("iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "wlan0", "-j", "MASQUERADE")                                                //nolint:errcheck
 	s.cmd.Run("iptables", "-A", "FORWARD", "-i", apInterface, "-o", "wlan0", "-j", "ACCEPT")                                                  //nolint:errcheck
 	s.cmd.Run("iptables", "-A", "FORWARD", "-i", "wlan0", "-o", apInterface, "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT") //nolint:errcheck
@@ -392,7 +380,8 @@ func (s *WiFi) applyExtender() error {
 
 // ─── Config file writers ──────────────────────────────────────────────────────
 
-func (s *WiFi) writeHostapdConf(cfg RouterConfig, iface string) error {
+// TODO: Make file path ejectable for testing
+func (s *WiFi) writeHostapdConf(cfg RouterConfig, iface, path string) error {
 	hwMode := "a"
 	if cfg.Band == "2.4GHz" {
 		hwMode = "g"
@@ -420,7 +409,7 @@ ignore_broadcast_ssid=0
 max_num_sta=%d
 `, iface, cfg.SSID, hwMode, cfg.Channel, cfg.Password, cfg.MaxClients)
 
-	return os.WriteFile("/etc/hostapd/hostapd.conf", []byte(content), 0600)
+	return os.WriteFile(path, []byte(content), 0600)
 }
 
 // writeDnsmasqConf writes /etc/dnsmasq.d/strct.conf.
@@ -481,14 +470,14 @@ network={
 
 func (s *WiFi) teardown() {
 	slog.Info("wifi: tearing down")
-	s.cmd.Run("systemctl", "stop", "hostapd")                                      //nolint:errcheck
-	s.cmd.Run("systemctl", "stop", "dnsmasq")                                      //nolint:errcheck
-	s.cmd.Run("killall", "wpa_supplicant")                                          //nolint:errcheck
-	s.cmd.Run("killall", "dhclient")                                                //nolint:errcheck
-	s.cmd.Run("iptables", "-t", "nat", "-F")                                       //nolint:errcheck
-	s.cmd.Run("iptables", "-F", "FORWARD")                                          //nolint:errcheck
-	s.cmd.Run("iw", "dev", "wlan0_ap", "del")                                      //nolint:errcheck
-	os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("0"), 0644)               //nolint:errcheck
+	s.cmd.Run("systemctl", "stop", "hostapd")                        //nolint:errcheck
+	s.cmd.Run("systemctl", "stop", "dnsmasq")                        //nolint:errcheck
+	s.cmd.Run("killall", "wpa_supplicant")                           //nolint:errcheck
+	s.cmd.Run("killall", "dhclient")                                 //nolint:errcheck
+	s.cmd.Run("iptables", "-t", "nat", "-F")                         //nolint:errcheck
+	s.cmd.Run("iptables", "-F", "FORWARD")                           //nolint:errcheck
+	s.cmd.Run("iw", "dev", "wlan0_ap", "del")                        //nolint:errcheck
+	os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("0"), 0644) //nolint:errcheck
 
 	s.mu.Lock()
 	s.status = Status{Mode: ModeOff, Active: false}

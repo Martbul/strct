@@ -49,3 +49,9 @@ Your code must be Production-Ready, Secure, and idiomatic to Go (The "Go Way").
 2. `golangci-lint` passes.
 3. Unit tests pass.
 4. Dockerfile builds successfully for ARM64.
+
+
+testing:
+Does my code issue the right commands? (unit tests with Mock)
+Does my parser handle real command output correctly? (table-driven tests with real output strings)
+Does the whole thing work on actual hardware? (integration tests, run on the real Pi)

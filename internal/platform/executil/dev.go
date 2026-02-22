@@ -19,10 +19,14 @@ import (
 
 // DevRunner satisfies Runner. Wrap it around Real{} so any command we
 // don't explicitly stub falls through to the real binary (e.g. frpc chmod).
-type DevRunner struct{ real Runner }
+type DevRunner struct{ 
+	real Runner
+ }
 
 func NewDevRunner() Runner {
-	return &DevRunner{real: Real{}}
+	return &DevRunner{
+		real: Real{},
+	}
 }
 
 // silentOK — these commands are pure side-effects on real hardware.
@@ -53,7 +57,6 @@ var silentOKSystemctlUnits = map[string]bool{
 	"tailscaled": true,
 }
 
-// ── Runner interface ──────────────────────────────────────────────────────────
 
 func (d *DevRunner) Run(name string, args ...string) error {
 	if d.shouldStub(name, args) {
@@ -79,7 +82,6 @@ func (d *DevRunner) CombinedOutput(name string, args ...string) ([]byte, error) 
 	return d.real.CombinedOutput(name, args...)
 }
 
-// ── decision logic ────────────────────────────────────────────────────────────
 
 func (d *DevRunner) shouldStub(name string, args []string) bool {
 	if silentOK[name] {
@@ -149,8 +151,6 @@ func (d *DevRunner) fakeOutput(name string, args []string) ([]byte, bool) {
 	return nil, false
 }
 
-// ── fake output constants ─────────────────────────────────────────────────────
-// These match the exact format the parsers in router.go and wifi.go expect.
 
 // fakeARP — three mock devices on wlan0.
 // router.go regexp: `\(([\d.]+)\) at ([0-9a-f:]{17})`
