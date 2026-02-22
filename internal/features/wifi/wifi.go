@@ -78,7 +78,6 @@ type Status struct {
 	Error        string `json:"error,omitempty"`
 }
 
-// ─── Service ──────────────────────────────────────────────────────────────────
 
 type WiFi struct {
 	cfg    config.Config

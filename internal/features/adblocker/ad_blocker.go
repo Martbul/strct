@@ -301,11 +301,12 @@
 // 		}
 // 	}
 
-// 	a.mu.Lock()
-// 	a.blocklist = newList
-// 	a.mu.Unlock()
-// 	slog.Info("adblocker: blocklist updated", "domains_loaded", count)
-// }
+//		a.mu.Lock()
+//		a.blocklist = newList
+//		a.mu.Unlock()
+//		slog.Info("adblocker: blocklist updated", "domains_loaded", count)
+//	}
+//
 // Package adblock manages DNS-level ad and tracker blocking via dnsmasq.
 //
 // This package is completely independent of wifi and vpn — it reads
@@ -313,10 +314,10 @@
 // address= directives into /etc/dnsmasq.d/adblock.conf.
 //
 // How it works:
-//   1. Downloads the StevenBlack unified hosts list (~100k domains)
-//   2. Converts each "0.0.0.0 domain.com" line → "address=/domain.com/0.0.0.0"
-//   3. Writes to /etc/dnsmasq.d/adblock.conf
-//   4. Sends SIGHUP to dnsmasq (reload without restart — no DHCP lease loss)
+//  1. Downloads the StevenBlack unified hosts list (~100k domains)
+//  2. Converts each "0.0.0.0 domain.com" line → "address=/domain.com/0.0.0.0"
+//  3. Writes to /etc/dnsmasq.d/adblock.conf
+//  4. Sends SIGHUP to dnsmasq (reload without restart — no DHCP lease loss)
 //
 // Every device connected to the AP gets blocking automatically,
 // including TVs, consoles, and anything that can't run a browser extension.
@@ -334,6 +335,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -360,7 +362,7 @@ type AdBlockConfig struct {
 
 type Status struct {
 	Enabled     bool      `json:"enabled"`
-	EntryCount  int       `json:"entry_count"`  // number of blocked domains
+	EntryCount  int       `json:"entry_count"` // number of blocked domains
 	LastUpdated time.Time `json:"last_updated"`
 	UpdateError string    `json:"update_error,omitempty"`
 	Updating    bool      `json:"updating"`
@@ -396,19 +398,19 @@ func New(cfg config.Config, cmd executil.Runner) *AdBlock {
 }
 
 func NewFromConfig(cfg *config.Config) *AdBlock {
-    var cmd executil.Runner
-    if cfg.IsDev {
-        cmd = executil.NewDevRunner()
-    } else {
-        cmd = executil.Real{}
-    }
-    return New(*cfg, cmd)
+	var cmd executil.Runner
+	if cfg.IsDev {
+		cmd = executil.NewDevRunner()
+	} else {
+		cmd = executil.Real{}
+	}
+	return New(*cfg, cmd)
 }
 
 func (s *AdBlock) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/adblock/config",  s.handleGetConfig)
+	mux.HandleFunc("GET /api/adblock/config", s.handleGetConfig)
 	mux.HandleFunc("POST /api/adblock/config", s.handleSetConfig)
-	mux.HandleFunc("GET /api/adblock/status",  s.handleGetStatus)
+	mux.HandleFunc("GET /api/adblock/status", s.handleGetStatus)
 	mux.HandleFunc("POST /api/adblock/update", s.handleUpdate) // manual refresh
 }
 
@@ -640,7 +642,12 @@ func (s *AdBlock) writeAdblockConf(body io.Reader) (int, error) {
 		return 0, err
 	}
 
-	// Atomic replace: rename temp file into place so dnsmasq never reads a partial file
+	// Ensure the dnsmasq drop-in directory exists
+	if err := os.MkdirAll(filepath.Dir(adblockConfPath), 0755); err != nil {
+		return 0, fmt.Errorf("mkdir %s: %w", filepath.Dir(adblockConfPath), err)
+	}
+
+	// Atomic replace
 	if err := os.Rename(tmpPath, adblockConfPath); err != nil {
 		return 0, fmt.Errorf("rename to %s: %w", adblockConfPath, err)
 	}
@@ -665,7 +672,7 @@ func (s *AdBlock) disable() {
 }
 
 func (s *AdBlock) setError(msg string) {
-	slog.Error("adblock: "+msg)
+	slog.Error("adblock: " + msg)
 	s.mu.Lock()
 	s.status.UpdateError = msg
 	s.mu.Unlock()

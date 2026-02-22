@@ -1,5 +1,3 @@
-// internal/platform/executil/dev.go
-//
 // DevRunner wraps Real{} and stubs hardware-only commands that don't
 // exist on a dev laptop (arp, iptables, hostapd, iwconfig, tc …).
 //
@@ -23,9 +21,9 @@ import (
 // don't explicitly stub falls through to the real binary (e.g. frpc chmod).
 type DevRunner struct{ real Runner }
 
-func NewDevRunner() Runner { return &DevRunner{real: Real{}} }
-
-// ── stub tables ───────────────────────────────────────────────────────────────
+func NewDevRunner() Runner {
+	return &DevRunner{real: Real{}}
+}
 
 // silentOK — these commands are pure side-effects on real hardware.
 // On a dev machine they either don't exist or would fail with permission
