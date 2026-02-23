@@ -307,6 +307,18 @@
 //		slog.Info("adblocker: blocklist updated", "domains_loaded", count)
 //	}
 //
+
+
+
+
+
+
+
+
+
+
+
+
 // Package adblock manages DNS-level ad and tracker blocking via dnsmasq.
 //
 // This package is completely independent of wifi and vpn — it reads
@@ -344,19 +356,14 @@ import (
 	"github.com/strct-org/strct-agent/internal/platform/executil"
 )
 
-// blocklist source — StevenBlack unified hosts (ads + trackers + malware)
-// https://github.com/StevenBlack/hosts
 const blocklistURL = "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
 
 const adblockConfPath = "/etc/dnsmasq.d/adblock.conf"
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 type AdBlockConfig struct {
 	Enabled bool `json:"enabled"`
 
-	// UpdateSchedule controls how often the blocklist is refreshed.
-	// "daily" | "weekly" | "manual"
 	UpdateSchedule string `json:"update_schedule"`
 }
 
@@ -368,7 +375,6 @@ type Status struct {
 	Updating    bool      `json:"updating"`
 }
 
-// ─── Service ──────────────────────────────────────────────────────────────────
 
 type AdBlock struct {
 	cfg    config.Config
@@ -388,7 +394,7 @@ func New(cfg config.Config, cmd executil.Runner) *AdBlock {
 			UpdateSchedule: "daily",
 		},
 		client: &http.Client{
-			Timeout: 60 * time.Second, // blocklist download can be slow on first run
+			Timeout: 60 * time.Second,
 			Transport: &http.Transport{
 				MaxIdleConnsPerHost: 1,
 				IdleConnTimeout:     90 * time.Second,
@@ -417,7 +423,6 @@ func (s *AdBlock) RegisterRoutes(mux *http.ServeMux) {
 func (s *AdBlock) Start(ctx context.Context) error {
 	slog.Info("adblock: service started")
 
-	// Load entry count from existing conf file (survives restarts)
 	if count := countExistingEntries(); count > 0 {
 		s.mu.Lock()
 		s.status.EntryCount = count
@@ -454,7 +459,6 @@ func (s *AdBlock) Start(ctx context.Context) error {
 	return nil
 }
 
-// ─── HTTP handlers ────────────────────────────────────────────────────────────
 
 func (s *AdBlock) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
