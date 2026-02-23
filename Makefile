@@ -1,61 +1,41 @@
-# =============================================================================
-# strct-agent Makefile
-# =============================================================================
-#
-# Usage:
-#   make              → build (default)
-#   make dev          → run in dev mode (no sudo, mock hardware)
-#   make run          → build + run with sudo (real hardware)
-#   make test         → run all unit tests with race detector
-#   make test-e2e     → run end-to-end tests (builds real binary)
-#   make test-cover   → unit tests + open HTML coverage report
-#   make lint         → gofmt + go vet + staticcheck
-#   make tidy         → go mod tidy
-#   make clean        → remove build artifacts
-#   make help         → print this message
-#
-# =============================================================================
-
-# -----------------------------------------------------------------------------
-# Variables
-# -----------------------------------------------------------------------------
-
-# Binary name and output path
 BINARY      := strct-agent
 BUILD_DIR   := ./bin
-
-# Main entrypoint
 CMD         := ./cmd/agent
 
-# Build-time variable injection (overridden by CI/release pipeline)
 DEFAULT_DOMAIN  ?= localhost
 DEFAULT_VPS_IP  ?= 127.0.0.1
 
-# These match the var names declared in cmd/agent/main.go
 LDFLAGS := -X main.DefaultDomain=$(DEFAULT_DOMAIN) \
            -X main.DefaultVPSIP=$(DEFAULT_VPS_IP)
 
-# Strip debug info in release builds (smaller binary, no source paths)
 RELEASE_LDFLAGS := $(LDFLAGS) -s -w
 
-# Go toolchain
 GO      := go
 GOTEST  := $(GO) test
 GOBUILD := $(GO) build
 
-# Test flags used everywhere
-# -race:     data race detector (mandatory — never skip this)
-# -count=1:  disable test result caching so tests always re-run
-TEST_FLAGS := -race -count=1
+# -race:    data race detector (mandatory — never skip this)
+# -count=1: disable test result caching so tests always re-run
+TEST_FLAGS   := -race -count=1
+TEST_TIMEOUT := 2m
+E2E_TIMEOUT  := 5m
 
-# Timeout for unit tests. E2E gets its own longer timeout.
-TEST_TIMEOUT    := 2m
-E2E_TIMEOUT     := 5m
+# Integration tests are slow: blocklist download ~10s, Tailscale handshake ~30s.
+INTEG_TIMEOUT := 5m
 
-# staticcheck binary (installed via go install if missing)
+# SSH targets — override per-session: make test-integration-remote DEVICE_OPI=pi@x.x.x.x
+DEVICE_VM  ?= martbul@192.168.100.19
+DEVICE_OPI ?= martbul@192.168.1.10
+
+# Tailscale pre-auth key for VPN integration tests.
+# Generate at tailscale.com/admin/settings/keys then:
+#   export TAILSCALE_TEST_AUTH_KEY=tskey-auth-xxx
+TAILSCALE_TEST_AUTH_KEY ?=
+
 STATICCHECK := $(shell which staticcheck 2>/dev/null)
 
-# Platform detection for open/xdg-open
+PPROF_PORT ?= 6060
+
 UNAME := $(shell uname)
 ifeq ($(UNAME), Darwin)
 	OPEN := open
@@ -63,7 +43,6 @@ else
 	OPEN := xdg-open
 endif
 
-# Colour output (disabled if NO_COLOR is set or terminal has no colours)
 ifneq ($(NO_COLOR),1)
 	RESET  := \033[0m
 	BOLD   := \033[1m
@@ -131,7 +110,7 @@ run-dev-sudo: build ## Build then run in dev mode with sudo (test sudo flow with
 	sudo $(BUILD_DIR)/$(BINARY) -dev
 
 # -----------------------------------------------------------------------------
-# Test
+# Unit tests (run anywhere — no hardware, no sudo needed)
 # -----------------------------------------------------------------------------
 
 .PHONY: test
@@ -181,6 +160,227 @@ ifndef PKG
 	@exit 1
 endif
 	$(GOTEST) $(TEST_FLAGS) -v -timeout $(TEST_TIMEOUT) $(PKG)
+
+# -----------------------------------------------------------------------------
+# Integration tests — run directly ON the Orange Pi
+#
+# Prerequisites on the Pi:
+#   - root / sudo — iptables, ip, hostapd, dnsmasq all require it
+#   - Packages installed: hostapd dnsmasq tailscale iw wireless-tools
+#   - Interface wlan0 present (need not be active)
+#   - Go installed on the Pi, OR use the remote targets below to ship
+#     pre-compiled test binaries from your laptop (no Go needed on Pi)
+#
+# All integration tests are guarded by //go:build integration so they
+# never run during a normal `go test ./...` — only when -tags integration
+# is explicitly passed.
+# -----------------------------------------------------------------------------
+
+# Internal macro — keeps all local integration invocations consistent.
+define run_integration
+	@printf "$(CYAN)▶ Integration: $(1)$(RESET)\n"
+	@printf "$(YELLOW)  Requires root + real hardware on this machine$(RESET)\n"
+	sudo $(GO) test \
+		-tags integration \
+		-v \
+		-count=1 \
+		-timeout $(INTEG_TIMEOUT) \
+		$(2) \
+		$(3)
+endef
+
+.PHONY: test-integration
+test-integration: ## Run ALL integration tests (must be on the Orange Pi, as root)
+	$(call run_integration,all packages,./internal/features/...,)
+
+.PHONY: test-integration-wifi
+test-integration-wifi: ## WiFi: AP mode, extender mode, teardown, Status() accuracy
+	$(call run_integration,wifi,./internal/features/wifi/...,-run TestIntegration)
+
+.PHONY: test-integration-adblock
+test-integration-adblock: ## Adblock: blocklist download, conf write, dnsmasq reload, DNS query check
+	$(call run_integration,adblock,./internal/features/adblock/...,-run TestIntegration)
+
+.PHONY: test-integration-router
+test-integration-router: ## Router: iptables rules, hostapd conf, device scanning via arp
+	$(call run_integration,router,./internal/features/router/...,-run TestIntegration)
+
+.PHONY: test-integration-vpn
+test-integration-vpn: ## VPN: tailscale up, subnet routing, status — needs TAILSCALE_TEST_AUTH_KEY
+	@if [ -z "$(TAILSCALE_TEST_AUTH_KEY)" ]; then \
+		printf "$(RED)✗ TAILSCALE_TEST_AUTH_KEY is not set$(RESET)\n"; \
+		printf "$(YELLOW)  Generate an ephemeral key at tailscale.com/admin/settings/keys$(RESET)\n"; \
+		printf "$(YELLOW)  Then: export TAILSCALE_TEST_AUTH_KEY=tskey-auth-xxx$(RESET)\n"; \
+		exit 1; \
+	fi
+	@printf "$(CYAN)▶ Integration: vpn$(RESET)\n"
+	@printf "$(YELLOW)  Requires root, tailscale installed, and valid auth key$(RESET)\n"
+	sudo -E $(GO) test \
+		-tags integration \
+		-v \
+		-count=1 \
+		-timeout $(INTEG_TIMEOUT) \
+		-run TestIntegration \
+		./internal/features/vpn/...
+
+.PHONY: test-integration-one
+test-integration-one: ## Run one named integration test: make test-integration-one TEST=TestIntegration_RouterMode_HostapdStarts
+ifndef TEST
+	@printf "$(RED)Usage: make test-integration-one TEST=TestIntegration_RouterMode_HostapdStarts$(RESET)\n"
+	@exit 1
+endif
+	@printf "$(CYAN)▶ Running: $(TEST)$(RESET)\n"
+	sudo $(GO) test \
+		-tags integration \
+		-v \
+		-count=1 \
+		-timeout $(INTEG_TIMEOUT) \
+		-run $(TEST) \
+		./internal/features/...
+
+# -----------------------------------------------------------------------------
+# Remote integration tests
+#
+# Cross-compiles test binaries on your laptop then ships them to the Pi
+# over SSH. Output streams back so you see results in your terminal.
+# No Go installation required on the Pi.
+#
+# Default target: DEVICE_OPI (martbul@192.168.1.10)
+# Override:       make test-integration-remote DEVICE_OPI=pi@x.x.x.x
+# -----------------------------------------------------------------------------
+
+# Compile a test binary for linux/arm64.
+# $1 = package path   $2 = output binary name
+define build_test_binary
+	@printf "$(CYAN)  Compiling $(2) (linux/arm64)...$(RESET)\n"
+	GOOS=linux GOARCH=arm64 \
+		$(GO) test \
+		-tags integration \
+		-c \
+		-o $(BUILD_DIR)/$(2) \
+		$(1)
+endef
+
+.PHONY: test-integration-remote
+test-integration-remote: ## Cross-compile all integration tests → scp → run on Pi (streams output)
+	@printf "$(CYAN)Building integration test binaries for linux/arm64...$(RESET)\n"
+	@mkdir -p $(BUILD_DIR)
+	$(call build_test_binary,./internal/features/wifi,wifi.test)
+	$(call build_test_binary,./internal/features/adblock,adblock.test)
+	$(call build_test_binary,./internal/features/router,router.test)
+	$(call build_test_binary,./internal/features/vpn,vpn.test)
+	@printf "$(CYAN)Copying to $(DEVICE_OPI)...$(RESET)\n"
+	ssh $(DEVICE_OPI) "mkdir -p ~/integ-tests"
+	scp $(BUILD_DIR)/wifi.test \
+	    $(BUILD_DIR)/adblock.test \
+	    $(BUILD_DIR)/router.test \
+	    $(BUILD_DIR)/vpn.test \
+	    $(DEVICE_OPI):~/integ-tests/
+	@printf "$(CYAN)Running on $(DEVICE_OPI) — streaming output...$(RESET)\n"
+	ssh $(DEVICE_OPI) " \
+		cd ~/integ-tests && \
+		sudo ./wifi.test    -test.v -test.timeout $(INTEG_TIMEOUT) -test.run TestIntegration && \
+		sudo ./adblock.test -test.v -test.timeout $(INTEG_TIMEOUT) -test.run TestIntegration && \
+		sudo ./router.test  -test.v -test.timeout $(INTEG_TIMEOUT) -test.run TestIntegration \
+	"
+	@printf "$(GREEN)✓ Remote integration tests complete$(RESET)\n"
+
+.PHONY: test-integration-remote-wifi
+test-integration-remote-wifi: ## Cross-compile + run WiFi integration tests on Pi only
+	@mkdir -p $(BUILD_DIR)
+	$(call build_test_binary,./internal/features/wifi,wifi.test)
+	scp $(BUILD_DIR)/wifi.test $(DEVICE_OPI):~/
+	@printf "$(CYAN)Running WiFi integration tests on $(DEVICE_OPI)...$(RESET)\n"
+	ssh $(DEVICE_OPI) "sudo ~/wifi.test -test.v -test.timeout $(INTEG_TIMEOUT) -test.run TestIntegration"
+	@printf "$(GREEN)✓ Done$(RESET)\n"
+
+.PHONY: test-integration-remote-adblock
+test-integration-remote-adblock: ## Cross-compile + run adblock integration tests on Pi only
+	@mkdir -p $(BUILD_DIR)
+	$(call build_test_binary,./internal/features/adblock,adblock.test)
+	scp $(BUILD_DIR)/adblock.test $(DEVICE_OPI):~/
+	@printf "$(CYAN)Running adblock integration tests on $(DEVICE_OPI)...$(RESET)\n"
+	ssh $(DEVICE_OPI) "sudo ~/adblock.test -test.v -test.timeout $(INTEG_TIMEOUT) -test.run TestIntegration"
+	@printf "$(GREEN)✓ Done$(RESET)\n"
+
+.PHONY: test-integration-remote-vpn
+test-integration-remote-vpn: ## Cross-compile + run VPN integration tests on Pi (needs TAILSCALE_TEST_AUTH_KEY)
+	@if [ -z "$(TAILSCALE_TEST_AUTH_KEY)" ]; then \
+		printf "$(RED)✗ TAILSCALE_TEST_AUTH_KEY is not set$(RESET)\n"; \
+		printf "$(YELLOW)  Generate one at tailscale.com/admin/settings/keys$(RESET)\n"; \
+		exit 1; \
+	fi
+	@mkdir -p $(BUILD_DIR)
+	$(call build_test_binary,./internal/features/vpn,vpn.test)
+	scp $(BUILD_DIR)/vpn.test $(DEVICE_OPI):~/
+	@printf "$(CYAN)Running VPN integration tests on $(DEVICE_OPI)...$(RESET)\n"
+	ssh $(DEVICE_OPI) " \
+		sudo TAILSCALE_TEST_AUTH_KEY=$(TAILSCALE_TEST_AUTH_KEY) \
+		~/vpn.test -test.v -test.timeout $(INTEG_TIMEOUT) -test.run TestIntegration \
+	"
+	@printf "$(GREEN)✓ Done$(RESET)\n"
+
+# -----------------------------------------------------------------------------
+# Pi diagnostics — run these before/during/after integration tests
+# -----------------------------------------------------------------------------
+
+.PHONY: integ-check
+integ-check: ## SSH to Pi and verify all integration test prerequisites
+	@printf "$(CYAN)Checking prerequisites on $(DEVICE_OPI)...$(RESET)\n"
+	@ssh $(DEVICE_OPI) ' \
+		echo "=== Board ==="; \
+		cat /proc/device-tree/model 2>/dev/null || echo "(no device-tree — not on SBC)"; \
+		uname -a; \
+		echo ""; \
+		echo "=== User (tests need root) ==="; \
+		id; \
+		echo ""; \
+		echo "=== Required binaries ==="; \
+		for b in hostapd dnsmasq tailscale tailscaled iw ip iptables tc wpa_supplicant; do \
+			which $$b 2>/dev/null && echo "  ✓ $$b" || echo "  ✗ $$b  ← MISSING"; \
+		done; \
+		echo ""; \
+		echo "=== Network interfaces ==="; \
+		ip link show | grep -E "^[0-9]+:" | awk "{print \"  \" \$$2}"; \
+		echo ""; \
+		echo "=== Service status ==="; \
+		for svc in hostapd dnsmasq tailscaled; do \
+			st=$$(systemctl is-active $$svc 2>/dev/null); \
+			echo "  $$svc: $$st"; \
+		done; \
+		echo ""; \
+		echo "=== Disk space (/etc /tmp) ==="; \
+		df -h /etc /tmp; \
+		echo ""; \
+		echo "=== Go on Pi ==="; \
+		go version 2>/dev/null || echo "  not installed (use remote targets to ship pre-built test binaries)"; \
+	'
+	@printf "$(GREEN)✓ Check complete$(RESET)\n"
+
+.PHONY: integ-logs
+integ-logs: ## Stream journald logs from hostapd, dnsmasq, strct-agent on Pi (Ctrl+C to stop)
+	@printf "$(CYAN)Streaming logs from $(DEVICE_OPI) — Ctrl+C to stop$(RESET)\n"
+	ssh $(DEVICE_OPI) "sudo journalctl -f -u hostapd -u dnsmasq -u strct-agent --no-hostname -o short-monotonic"
+
+.PHONY: integ-cleanup
+integ-cleanup: ## SSH to Pi and remove all leftover state from failed integration tests
+	@printf "$(YELLOW)Cleaning up integration test state on $(DEVICE_OPI)...$(RESET)\n"
+	ssh $(DEVICE_OPI) ' \
+		sudo systemctl stop hostapd dnsmasq 2>/dev/null || true; \
+		sudo iptables -F; \
+		sudo iptables -t nat -F; \
+		sudo iptables -X; \
+		sudo ip6tables -F 2>/dev/null || true; \
+		sudo ip addr flush dev wlan0 2>/dev/null || true; \
+		sudo iw dev wlan0_ap del 2>/dev/null || true; \
+		sudo killall wpa_supplicant 2>/dev/null || true; \
+		sudo tailscale down 2>/dev/null || true; \
+		sudo rm -f /etc/dnsmasq.d/adblock.conf \
+		           /etc/dnsmasq.d/strct.conf \
+		           /etc/hostapd/hostapd.conf; \
+		echo "Done — Pi is clean"; \
+	'
+	@printf "$(GREEN)✓ Cleanup complete$(RESET)\n"
 
 # -----------------------------------------------------------------------------
 # Lint & Format
@@ -259,11 +459,6 @@ generate: ## Run go generate across all packages (Wire, mocks, etc.)
 # Profiling (pprof via SSH tunnel)
 # -----------------------------------------------------------------------------
 
-# Override these per-session: make pprof-vm DEVICE_VM=user@x.x.x.x
-DEVICE_VM  ?= martbul@192.168.100.19
-DEVICE_OPI ?= martbul@192.168.1.10
-PPROF_PORT ?= 6060
-
 .PHONY: pprof-kill
 pprof-kill: ## Kill any existing SSH tunnel holding PPROF_PORT
 	@printf "$(YELLOW)Freeing port $(PPROF_PORT)...$(RESET)\n"
@@ -312,7 +507,7 @@ pprof-allocs: ## Show allocation profile (tunnel must be open)
 # -----------------------------------------------------------------------------
 
 .PHONY: install
-install: build-arm64 ## Copy the ARM64 binary to the device over SSH
+install: build-arm64 ## Cross-compile and copy binary to the device over SSH
 ifndef DEVICE
 	@printf "$(RED)Usage: make install DEVICE=pi@192.168.1.10$(RESET)\n"
 	@exit 1
@@ -357,22 +552,37 @@ info: ## Print build information
 .PHONY: help
 help: ## Print available targets and their descriptions
 	@printf "$(BOLD)strct-agent$(RESET) — available targets:\n\n"
+	@printf "$(BOLD)Unit tests (run anywhere):$(RESET)\n"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
-		| awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-20s$(RESET) %s\n", $$1, $$2}'
+		| grep -E '^test' | grep -v integration \
+		| awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-40s$(RESET) %s\n", $$1, $$2}'
+	@printf "\n$(BOLD)Integration — local (on Orange Pi, as root):$(RESET)\n"
+	@grep -E '^test-integration[^-r][a-zA-Z_-]*:.*?## .*$$' $(MAKEFILE_LIST) \
+		| awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-40s$(RESET) %s\n", $$1, $$2}'
+	@printf "\n$(BOLD)Integration — remote (cross-compile on laptop → run on Pi):$(RESET)\n"
+	@grep -E '^test-integration-remote[a-zA-Z_-]*:.*?## .*$$' $(MAKEFILE_LIST) \
+		| awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-40s$(RESET) %s\n", $$1, $$2}'
+	@printf "\n$(BOLD)Pi diagnostics:$(RESET)\n"
+	@grep -E '^integ-[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+		| awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-40s$(RESET) %s\n", $$1, $$2}'
+	@printf "\n$(BOLD)Build / Run / Other:$(RESET)\n"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+		| grep -vE '^(test|integ)' \
+		| awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-40s$(RESET) %s\n", $$1, $$2}'
 	@printf "\n$(BOLD)Variables:$(RESET)\n"
-	@printf "  $(CYAN)DEFAULT_DOMAIN$(RESET)   Backend domain (default: localhost)\n"
-	@printf "  $(CYAN)DEFAULT_VPS_IP$(RESET)   VPS server IP  (default: 127.0.0.1)\n"
-	@printf "  $(CYAN)DEVICE$(RESET)           SSH target for deploy (e.g. pi@192.168.1.10)\n"
-	@printf "  $(CYAN)PKG$(RESET)              Package path for test-pkg target\n"
-	@printf "  $(CYAN)DEVICE_VM$(RESET)        VM SSH target for pprof tunnel (default: martbul@192.168.100.19)\n"
-	@printf "  $(CYAN)DEVICE_OPI$(RESET)       Orange Pi SSH target for pprof tunnel\n"
-	@printf "  $(CYAN)PPROF_PORT$(RESET)       pprof port (default: 6060)\n"
-	@printf "\n$(BOLD)Examples:$(RESET)\n"
-	@printf "  make dev\n"
-	@printf "  make test\n"
-	@printf "  make test-pkg PKG=./internal/features/cloud\n"
-	@printf "  make build-arm64 DEFAULT_DOMAIN=strct.org DEFAULT_VPS_IP=1.2.3.4\n"
-	@printf "  make install DEVICE=pi@192.168.1.10\n"
-	@printf "  make pprof-vm                           # tunnel from VM, open browser manually\n"
-	@printf "  make pprof-cpu                          # flame graph after tunnel is open\n"
-	@printf "  make pprof-vm DEVICE_VM=pi@10.0.0.5    # override VM address\n"
+	@printf "  $(CYAN)DEFAULT_DOMAIN$(RESET)            Backend domain (default: localhost)\n"
+	@printf "  $(CYAN)DEFAULT_VPS_IP$(RESET)            VPS server IP  (default: 127.0.0.1)\n"
+	@printf "  $(CYAN)DEVICE$(RESET)                    SSH target for install (e.g. pi@192.168.1.10)\n"
+	@printf "  $(CYAN)DEVICE_OPI$(RESET)                Orange Pi SSH target (default: martbul@192.168.1.10)\n"
+	@printf "  $(CYAN)DEVICE_VM$(RESET)                 VM SSH target for pprof (default: martbul@192.168.100.19)\n"
+	@printf "  $(CYAN)TAILSCALE_TEST_AUTH_KEY$(RESET)   Ephemeral pre-auth key for VPN integration tests\n"
+	@printf "  $(CYAN)PKG$(RESET)                       Package path for test-pkg\n"
+	@printf "  $(CYAN)TEST$(RESET)                      Test name for test-integration-one\n"
+	@printf "  $(CYAN)PPROF_PORT$(RESET)                pprof port (default: 6060)\n"
+	@printf "\n$(BOLD)Typical integration workflow:$(RESET)\n"
+	@printf "  make integ-check                                   # verify Pi has prereqs\n"
+	@printf "  make test-integration-remote-wifi                  # compile + ship + run WiFi tests\n"
+	@printf "  make test-integration-remote-adblock               # compile + ship + run adblock tests\n"
+	@printf "  make integ-logs                                    # stream Pi logs in parallel\n"
+	@printf "  make integ-cleanup                                 # tear down after tests\n"
+	@printf "  make test-integration-one TEST=TestIntegration_X   # iterate on one test\n"

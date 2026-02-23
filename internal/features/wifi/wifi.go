@@ -378,9 +378,6 @@ func (s *WiFi) applyExtender() error {
 	return nil
 }
 
-// ─── Config file writers ──────────────────────────────────────────────────────
-
-// TODO: Make file path ejectable for testing
 func (s *WiFi) writeHostapdConf(cfg RouterConfig, iface, path string) error {
 	hwMode := "a"
 	if cfg.Band == "2.4GHz" {
@@ -466,7 +463,6 @@ network={
 	return os.WriteFile("/etc/wpa_supplicant/wpa_supplicant-wlan0.conf", []byte(content), 0600)
 }
 
-// ─── Teardown ─────────────────────────────────────────────────────────────────
 
 func (s *WiFi) teardown() {
 	slog.Info("wifi: tearing down")
@@ -484,7 +480,6 @@ func (s *WiFi) teardown() {
 	s.mu.Unlock()
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func (s *WiFi) refreshStatus() {
 	s.mu.RLock()
